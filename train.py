@@ -61,10 +61,18 @@ def train_model_on_dataset(rank, train_cfg):
     dataloader = DataLoader(dataset, batch_size=train_cfg.TRAIN.BATCH_SIZE,
                             num_workers=train_cfg.TRAIN.NUM_WORKERS,
                             sampler=train_sampler)
-    optimizer = torch.optim.SGD(
-        params=model.parameters(),
-        lr=train_cfg.TRAIN.LR.BASE_LR,
-        momentum=train_cfg.TRAIN.LR.MOMENTUM)
+    #optimizer = torch.optim.SGD(
+    #    params=model.parameters(),
+    #    lr=train_cfg.TRAIN.LR.BASE_LR,
+    #    momentum=train_cfg.TRAIN.LR.MOMENTUM)
+    
+    ignored_params = list(map(id, model.lang_fc.parameters() )) + list(map(id, model.resnet50.classifier.parameters() ))
+    base_params = filter(lambda p: id(p) not in ignored_params, model.parameters())
+    optimizer_ft = optim.SGD([
+             {'params': base_params, 'lr': 0.1*train_cfg.TRAIN.LR.BASE_LR,},
+             {'params': model.classifier.parameters(), 'lr': train_cfg.TRAIN.LR.BASE_LR,}
+         ], weight_decay=5e-4, momentum=0.9, nesterov=True)
+    
     lr_scheduler = StepLR(optimizer,
                           step_size=train_cfg.TRAIN.LR.STEP_SIZE,
                           gamma=train_cfg.TRAIN.LR.WEIGHT_DECAY)
