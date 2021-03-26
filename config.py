@@ -16,10 +16,10 @@ _C.TYPE = "TRAIN"
 _C.DATA = CN()
 # Path to MTMC imgs of CityFlow Benchmark.
 _C.DATA.CITYFLOW_PATH = "data/cityflow/MTMC"
-_C.DATA.JSON_PATH = "data/train-track.json"
-_C.DATA.CROP_SIZE = (128, 128)
+_C.DATA.JSON_PATH = "data/train-tracks.json"
+_C.DATA.CROP_SIZE = (256, 256)
 _C.DATA.POSITIVE_THRESHOLD = 0.5
-_C.DATA.EVAL_TRACKS_JSON_PATH = "data/test-track.json"
+_C.DATA.EVAL_TRACKS_JSON_PATH = "data/test-tracks.json"
 
 # Model specific configurations.
 _C.MODEL = CN()
@@ -32,7 +32,7 @@ _C.MODEL.OUTPUT_SIZE = 256
 _C.TRAIN = CN()
 _C.TRAIN.START_EPOCH = 1
 _C.TRAIN.EPOCH = 20
-_C.TRAIN.BATCH_SIZE = 32
+_C.TRAIN.BATCH_SIZE = 12
 _C.TRAIN.NUM_WORKERS = 2
 _C.TRAIN.PRINT_FREQ = 250
 _C.TRAIN.LOSS_CLIP_VALUE = 10.

@@ -5,26 +5,20 @@ Baseline Siamese model for vehicle retrieval task on CityFlow-NL
 """
 import torch
 import torch.nn.functional as F
-from torchvision.models import resnet50
-from transformers import BertTokenizer, BertModel
+from model import ft_net_SE 
+from transformers import AutoTokenizer, AutoModel
 
 
 class SiameseBaselineModel(torch.nn.Module):
     def __init__(self, model_cfg):
         super().__init__()
         self.model_cfg = model_cfg
-        self.resnet50 = resnet50(pretrained=False,
-                                 num_classes=model_cfg.OUTPUT_SIZE)
-        state_dict = torch.load(self.model_cfg.RESNET_CHECKPOINT,
-                                map_location=lambda storage, loc: storage.cpu())
-        del state_dict["fc.weight"]
-        del state_dict["fc.bias"]
-        self.resnet50.load_state_dict(state_dict, strict=False)
-        self.bert_tokenizer = BertTokenizer.from_pretrained(
-            self.model_cfg.BERT_CHECKPOINT)
-        self.bert_model = BertModel.from_pretrained(
-            self.model_cfg.BERT_CHECKPOINT)
-        self.lang_fc = torch.nn.Linear(768, model_cfg.OUTPUT_SIZE)
+        self.resnet50 = ft_net_SE( class_num = 2498, stride=2, pool='gem',
+                                 circle =True)
+        self.bert_tokenizer = AutoTokenizer.from_pretrained("bert-base-uncased")
+        self.bert_model = AutoModel.from_pretrained("bert-base-uncased")
+        #self.lang_fc = torch.nn.Linear(768, 1024)
+        self.lang_fc = torch.nn.Linear(768, 4096)
 
     def forward(self, track):
         nl = track["nl"]
@@ -34,16 +28,19 @@ class SiameseBaselineModel(torch.nn.Module):
                                   attention_mask=tokens[
                                       'attention_mask'].cuda())
         lang_embeds = torch.mean(outputs.last_hidden_state, dim=1)
-        lang_embeds = self.lang_fc(lang_embeds)
+        lang_embeds = self.lang_fc(lang_embeds) # 2048
         crops = track["crop"].cuda()
-        visual_embeds = self.resnet50(crops)
+        predict_class_v, visual_embeds = self.resnet50(crops) # 3028, 512
+        predict_class_l, lang_embeds = self.resnet50.classifier(lang_embeds) # 3028, 512
         d = F.pairwise_distance(visual_embeds, lang_embeds)
         similarity = torch.exp(-d)
-        return similarity
+        return similarity, predict_class_v, predict_class_l
 
     def compute_loss(self, track):
-        similarity = self.forward(track)
-        loss = F.binary_cross_entropy(similarity, track["label"][:, 0].cuda())
+        similarity, predict_class_v, predict_class_l = self.forward(track)
+        loss = F.binary_cross_entropy(similarity, track["label"][:, 0].cuda())\
+              + F.cross_entropy(predict_class_v, track["id"].cuda())\
+              + F.cross_entropy(predict_class_l, track["nl-id"].cuda())
         return loss
 
     def compute_lang_embed(self, nls, rank):
@@ -56,12 +53,13 @@ class SiameseBaselineModel(torch.nn.Module):
                                           'attention_mask'].cuda(rank))
             lang_embeds = torch.mean(outputs.last_hidden_state, dim=1)
             lang_embeds = self.lang_fc(lang_embeds)
+            _, lang_embeds = self.resnet50.classifier(lang_embeds) # 3028, 512
         return lang_embeds
 
     def compute_similarity_on_frame(self, track, lang_embeds, rank):
         with torch.no_grad():
             crops = track["crops"][0].cuda(rank)
-            visual_embeds = self.resnet50(crops)
+            _, visual_embeds = self.resnet50(crops)
             similarity = 0.
             for lang_embed in lang_embeds:
                 d = F.pairwise_distance(visual_embeds, lang_embed)

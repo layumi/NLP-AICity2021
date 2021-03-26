@@ -25,6 +25,8 @@ from utils import TqdmToLogger, get_logger
 from vehicle_retrieval_dataset import CityFlowNLDataset
 from vehicle_retrieval_dataset import CityFlowNLInferenceDataset
 
+torch.backends.cudnn.enabled = True
+torch.backends.cudnn.benchmark = True
 torch.multiprocessing.set_sharing_strategy('file_system')
 
 flags.DEFINE_integer("num_machines", 1, "Number of machines.")
@@ -32,8 +34,8 @@ flags.DEFINE_integer("local_machine", 0,
                      "Master node is 0, worker nodes starts from 1."
                      "Max should be num_machines - 1.")
 
-flags.DEFINE_integer("num_gpus", 2, "Number of GPUs per machines.")
-flags.DEFINE_string("config_file", "baseline/default.yaml",
+flags.DEFINE_integer("num_gpus", 1, "Number of GPUs per machines.")
+flags.DEFINE_string("config_file", "./default.yaml",
                     "Default Configuration File.")
 
 flags.DEFINE_string("master_ip", "127.0.0.1",
@@ -87,6 +89,7 @@ def train_model_on_dataset(rank, train_cfg):
         for data in dataloader:
             optimizer.zero_grad()
             loss = model.module.compute_loss(data)
+            print(loss.data.item())
             if not (math.isnan(loss.data.item())
                     or math.isinf(loss.data.item())
                     or loss.data.item() > train_cfg.TRAIN.LOSS_CLIP_VALUE):
