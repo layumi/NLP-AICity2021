@@ -4,6 +4,7 @@ models/
 logs/
 data/
 snapshots/
+experiments/
 __pycache__/
 __MACOSX/
 configs/cifs9a31
