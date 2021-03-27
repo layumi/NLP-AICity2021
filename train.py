@@ -1,203 +1,406 @@
-#!/usr/bin/env python
-# COPYRIGHT 2020. Fred Fung. Boston University.
-"""
-Script for training and inference of the baseline model on CityFlow-NL.
-"""
-import json
-import math
-import os
-import sys
-from datetime import datetime
+# -*- coding: utf-8 -*-
 
+from __future__ import print_function, division
+
+import argparse
 import torch
-import torch.distributed as dist
-import torch.multiprocessing
-import torch.multiprocessing as mp
-from absl import flags
-from torch.nn.parallel import DistributedDataParallel
-from torch.optim.lr_scheduler import StepLR
-from torch.utils.data import DataLoader, DistributedSampler
-from tqdm import tqdm
-
-from config import get_default_config
+import torch.nn as nn
+import torch.optim as optim
+from torch.optim import lr_scheduler
+from torch.autograd import Variable
+from torchvision import datasets, transforms
+import torch.backends.cudnn as cudnn
+import matplotlib
+matplotlib.use('agg')
+import matplotlib.pyplot as plt
+#from PIL import Image
+import time
+import os
 from siamese_baseline_model import SiameseBaselineModel
-from utils import TqdmToLogger, get_logger
 from vehicle_retrieval_dataset import CityFlowNLDataset
 from vehicle_retrieval_dataset import CityFlowNLInferenceDataset
+import yaml
+from shutil import copyfile
+import random
+from autoaugment import ImageNetPolicy
+from utils import get_model_list, load_network, save_network, make_weights_for_balanced_classes
+from circle_loss import CircleLoss, convert_label_to_similarity
 
-torch.backends.cudnn.enabled = True
-torch.backends.cudnn.benchmark = True
-torch.multiprocessing.set_sharing_strategy('file_system')
+version =  torch.__version__
+#fp16
+try:
+    from apex.fp16_utils import *
+    from apex import amp, optimizers
+except ImportError: # will be 3.x series
+    print('This is not an error. If you want to use low precision, i.e., fp16, please install the apex with cuda support (https://github.com/NVIDIA/apex) and update pytorch to 1.0')
 
-flags.DEFINE_integer("num_machines", 1, "Number of machines.")
-flags.DEFINE_integer("local_machine", 0,
-                     "Master node is 0, worker nodes starts from 1."
-                     "Max should be num_machines - 1.")
+# make the output
+if not os.path.isdir('./data/outputs'):
+    os.mkdir('./data/outputs')
+######################################################################
+# Options
+# --------
+parser = argparse.ArgumentParser(description='Training')
+parser.add_argument('--gpu_ids',default='0', type=str,help='gpu_ids: e.g. 0  0,1,2  0,2')
+parser.add_argument('--adam', action='store_true', help='use all training data' )
+parser.add_argument('--name',default='ft_ResNet50', type=str, help='output model name')
+parser.add_argument('--init_name',default='imagenet', type=str, help='initial with ImageNet')
+parser.add_argument('--data_dir',default='./data/pytorch2021',type=str, help='training dir path')
+parser.add_argument('--color_jitter', action='store_true', help='use color jitter in training' )
+parser.add_argument('--batchsize', default=32, type=int, help='batchsize')
+parser.add_argument('--inputsize', default=299, type=int, help='batchsize')
+parser.add_argument('--h', default=299, type=int, help='height')
+parser.add_argument('--w', default=299, type=int, help='width')
+parser.add_argument('--stride', default=2, type=int, help='stride')
+parser.add_argument('--pool',default='avg', type=str, help='last pool')
+parser.add_argument('--autoaug', action='store_true', help='use Color Data Augmentation' )
+parser.add_argument('--erasing_p', default=0, type=float, help='Random Erasing probability, in [0,1]')
+parser.add_argument('--use_dense', action='store_true', help='use densenet121' )
+parser.add_argument('--use_NAS', action='store_true', help='use nasnetalarge' )
+parser.add_argument('--use_SE', action='store_true', help='use se_resnext101_32x4d' )
+parser.add_argument('--use_DSE', action='store_true', help='use senet154' )
+parser.add_argument('--use_IR', action='store_true', help='use InceptionResNetv2' )
+parser.add_argument('--use_EF4', action='store_true', help='use EF4' )
+parser.add_argument('--use_EF5', action='store_true', help='use EF5' )
+parser.add_argument('--use_EF6', action='store_true', help='use EF6' )
+parser.add_argument('--lr', default=0.05, type=float, help='learning rate')
+parser.add_argument('--droprate', default=0.5, type=float, help='drop rate')
+parser.add_argument('--PCB', action='store_true', help='use PCB+ResNet50' )
+parser.add_argument('--CPB', action='store_true', help='use Center+ResNet50' )
+parser.add_argument('--fp16', action='store_true', help='use float16 instead of float32, which will save about 50% memory' )
+parser.add_argument('--balance', action='store_true', help='balance sample' )
+parser.add_argument('--angle', action='store_true', help='use angle loss' )
+parser.add_argument('--arc', action='store_true', help='use arc loss' )
+parser.add_argument('--circle', action='store_true', help='use Circle loss' )
+parser.add_argument('--noisy', action='store_true', help='use model trained with noisy student' )
+parser.add_argument('--warm_epoch', default=0, type=int, help='the first K epoch that needs warm up')
+parser.add_argument('--resume', action='store_true', help='use arc loss' )
+opt = parser.parse_args()
 
-flags.DEFINE_integer("num_gpus", 1, "Number of GPUs per machines.")
-flags.DEFINE_string("config_file", "./default.yaml",
-                    "Default Configuration File.")
+if opt.resume:
+    model, opt, start_epoch = load_network(opt.name, opt)
+else:
+    start_epoch = 0
 
-flags.DEFINE_string("master_ip", "127.0.0.1",
-                    "Master node IP for initialization.")
-flags.DEFINE_integer("master_port", 12000,
-                     "Master node port for initialization.")
-
-FLAGS = flags.FLAGS
+print(start_epoch)
 
 
-def train_model_on_dataset(rank, train_cfg):
-    _logger = get_logger("training")
-    dist_rank = rank + train_cfg.LOCAL_MACHINE * train_cfg.NUM_GPU_PER_MACHINE
-    dist.init_process_group(backend="nccl", rank=dist_rank,
-                            world_size=train_cfg.WORLD_SIZE,
-                            init_method=train_cfg.INIT_METHOD)
-    dataset = CityFlowNLDataset(train_cfg.DATA)
-    dataset_size = len(dataset)
-    model = SiameseBaselineModel(train_cfg.MODEL).cuda()
-    model = DistributedDataParallel(model, device_ids=[rank],
-                                    output_device=rank,
-                                    broadcast_buffers=train_cfg.WORLD_SIZE > 1)
-    train_sampler = DistributedSampler(dataset)
-    dataloader = DataLoader(dataset, batch_size=train_cfg.TRAIN.BATCH_SIZE,
-                            num_workers=train_cfg.TRAIN.NUM_WORKERS,
-                            sampler=train_sampler, pin_memory=True, drop_last=True)
-    #optimizer = torch.optim.SGD(
-    #    params=model.parameters(),
-    #    lr=train_cfg.TRAIN.LR.BASE_LR,
-    #    momentum=train_cfg.TRAIN.LR.MOMENTUM)
-    
-    ignored_params = list(map(id, model.module.lang_fc.parameters() )) + list(map(id, model.module.resnet50.classifier.parameters() ))
-    base_params = filter(lambda p: id(p) not in ignored_params, model.parameters())
-    optimizer = torch.optim.SGD([
-             {'params': base_params, 'lr': 0.1*train_cfg.TRAIN.LR.BASE_LR,},
-             {'params': model.module.lang_fc.parameters(), 'lr': train_cfg.TRAIN.LR.BASE_LR,},
-             {'params': model.module.resnet50.classifier.parameters(), 'lr': train_cfg.TRAIN.LR.BASE_LR,}
-         ], weight_decay=5e-4, momentum=0.9, nesterov=True)
-    
-    lr_scheduler = StepLR(optimizer,
-                          step_size=train_cfg.TRAIN.LR.STEP_SIZE,
-                          gamma=train_cfg.TRAIN.LR.WEIGHT_DECAY)
-    if rank == 0:
-        if not os.path.exists(
-                os.path.join(train_cfg.LOG_DIR, train_cfg.EXPR_NAME)):
-            os.makedirs(
-                os.path.join(train_cfg.LOG_DIR, train_cfg.EXPR_NAME, "summary"))
-            os.makedirs(os.path.join(train_cfg.LOG_DIR, train_cfg.EXPR_NAME,
-                                     "checkpoints"))
-        with open(os.path.join(train_cfg.LOG_DIR, train_cfg.EXPR_NAME,
-                               "config.yaml"), "w") as f:
-            f.write(train_cfg.dump())
+fp16 = opt.fp16
+data_dir = opt.data_dir
+name = opt.name
 
-    global_step = 0
+if not opt.resume:
+    str_ids = opt.gpu_ids.split(',')
+    gpu_ids = []
+    for str_id in str_ids:
+        gid = int(str_id)
+        if gid >=0:
+            gpu_ids.append(gid)
+    opt.gpu_ids = gpu_ids
+
+# set gpu ids
+if len(opt.gpu_ids)>0:
+    cudnn.enabled = True
+    cudnn.benchmark = True
+######################################################################
+# Load Data
+# ---------
+#
+
+dataset = CityFlowNLDataset(train_cfg.DATA)
+dataset_size = len(dataset)
+dataloader = DataLoader(dataset, batch_size=opt.batchsize,
+                            num_workers=4, pin_memory=True, drop_last=True)
+
+use_gpu = torch.cuda.is_available()
+
+#since = time.time()
+#inputs, classes = next(iter(dataloaders['train']))
+#print(time.time()-since)
+
+######################################################################
+# Training the model
+# ------------------
+#
+# Now, let's write a general function to train a model. Here, we will
+# illustrate:
+#
+# -  Scheduling the learning rate
+# -  Saving the best model
+#
+# In the following, parameter ``scheduler`` is an LR scheduler object from
+# ``torch.optim.lr_scheduler``.
+
+y_loss = {} # loss history
+y_loss['train'] = []
+y_loss['val'] = []
+y_err = {}
+y_err['train'] = []
+y_err['val'] = []
+
+def train_model(model, criterion, optimizer, scheduler, start_epoch=0, num_epochs=25):
+    since = time.time()
+
     warm_up = 0.1 # We start from the 0.1*lrRate
-    warm_iteration = round(dataset_size/train_cfg.TRAIN.BATCH_SIZE)*5 # first 5 epoch
+    gamma = 0.0 #auto_aug
+    warm_iteration = round(dataset_sizes['train']/opt.batchsize)*opt.warm_epoch # first 5 epoch
+    total_iteration = round(dataset_sizes['train']/opt.batchsize)*num_epochs
 
-    for epoch in range(train_cfg.TRAIN.START_EPOCH, train_cfg.TRAIN.EPOCH):
-        if rank == 0:
-            pbar = tqdm(total=len(dataloader), leave=False,
-                        desc="Training Epoch %d" % epoch,
-                        file=TqdmToLogger(),
-                        mininterval=1, maxinterval=100, )
-        for data in dataloader:
-            optimizer.zero_grad()
-            loss = model.module.compute_loss(data)
-            #warm up first 5 epoch
-            if epoch<5: 
-                warm_up = min(1.0, warm_up + 0.9 / warm_iteration)
-                loss = loss*warm_up
-            print(loss.data.item())
+    best_model_wts = model.state_dict()
+    best_loss = 9999
+    best_epoch = 0
+    
+    if opt.circle:
+        criterion_circle = CircleLoss(m=0.25, gamma=32)
+        
+    for epoch in range(num_epochs-start_epoch):
+        epoch = epoch + start_epoch
+        print('gamma: %.4f'%gamma)
+        print('Epoch {}/{}'.format(epoch, num_epochs - 1))
+        print('-' * 10)
 
-            if not (math.isnan(loss.data.item())
-                    or math.isinf(loss.data.item())
-                    or loss.data.item() > train_cfg.TRAIN.LOSS_CLIP_VALUE):
-                loss.backward()
-                optimizer.step()
-            if rank == 0:
-                pbar.update()
-            if global_step % train_cfg.TRAIN.PRINT_FREQ == 0:
-                if rank == 0:
-                    _logger.info("EPOCH\t%d; STEP\t%d; LOSS\t%.4f" % (
-                        epoch, global_step, loss.data.item()))
-            global_step += 1
-        if rank == 0:
-            checkpoint_file = os.path.join(train_cfg.LOG_DIR,
-                                           train_cfg.EXPR_NAME, "checkpoints",
-                                           "CKPT-E%d-S%d.pth" % (
-                                               epoch, global_step))
-            torch.save(
-                {"epoch": epoch, "global_step": global_step,
-                 "state_dict": model.state_dict(),
-                 "optimizer": optimizer.state_dict()}, checkpoint_file)
-            _logger.info("CHECKPOINT SAVED AT: %s" % checkpoint_file)
-            pbar.close()
-        lr_scheduler.step()
+        # Each epoch has a training and validation phase
+        for phase in ['train']:
+            if phase == 'train':
+                scheduler.step()
+                model.train(True)  # Set model to training mode
+            else:
+                model.train(False)  # Set model to evaluate mode
 
-    dist.destroy_process_group()
+            running_loss = 0.0
+            running_corrects = 0.0
+            # Iterate over data.
+            for data in dataloaders[phase]:
+                # get the inputs
+                if opt.autoaug:
+                    inputs, inputs2, labels = data
+                    if random.uniform(0, 1)> gamma:
+                        inputs = inputs2
+                    gamma = min(1.0, gamma + 1.0 / total_iteration)
+                else:
+                    inputs, labels = data
 
+                now_batch_size,c,h,w = inputs.shape
+                if now_batch_size<opt.batchsize: # skip the last batch
+                    continue
+                #print(inputs.shape)
+                # wrap them in Variable
+                if use_gpu:
+                    inputs = Variable(inputs.cuda().detach())
+                    labels = Variable(labels.cuda().detach())
+                else:
+                    inputs, labels = Variable(inputs), Variable(labels)
+                # if we use low precision, input also need to be fp16
+                #if fp16:
+                #    inputs = inputs.half()
+ 
+                # zero the parameter gradients
+                optimizer.zero_grad()
 
-def eval_model_on_dataset(rank, eval_cfg, queries):
-    _logger = get_logger("evaluation")
-    if rank == 0:
-        if not os.path.exists(
-                os.path.join(eval_cfg.LOG_DIR, eval_cfg.EXPR_NAME)):
-            os.makedirs(
-                os.path.join(eval_cfg.LOG_DIR, eval_cfg.EXPR_NAME, "logs"))
-        with open(os.path.join(eval_cfg.LOG_DIR, eval_cfg.EXPR_NAME,
-                               "config.yaml"), "w") as f:
-            f.write(eval_cfg.dump())
-    dataset = CityFlowNLInferenceDataset(eval_cfg.DATA)
-    model = SiameseBaselineModel(eval_cfg.MODEL)
-    ckpt = torch.load(eval_cfg.EVAL.RESTORE_FROM,
-                      map_location=lambda storage, loc: storage.cpu())
-    restore_kv = {key.replace("module.", ""): ckpt["state_dict"][key] for key in
-                  ckpt["state_dict"].keys()}
-    model.load_state_dict(restore_kv, strict=True)
-    model = model.cuda(rank)
-    dataloader = DataLoader(dataset,
-                            batch_size=eval_cfg.EVAL.BATCH_SIZE,
-                            num_workers=eval_cfg.EVAL.NUM_WORKERS)
-
-    for idx, query_id in enumerate(queries):
-        if idx % eval_cfg.WORLD_SIZE != rank:
-            continue
-        _logger.info("Evaluate query %s on GPU %d" % (query_id, rank))
-        track_score = dict()
-        q = queries[query_id]
-        for track in dataloader:
-            lang_embeds = model.compute_lang_embed(q, rank)
-            s = model.compute_similarity_on_frame(track, lang_embeds, rank)
-            track_id = track["id"][0]
-            track_score[track_id] = s
-        top_tracks = sorted(track_score, key=track_score.get, reverse=True)
-        with open(os.path.join(eval_cfg.LOG_DIR, eval_cfg.EXPR_NAME, "logs",
-                               "%s.log" % query_id), "w") as f:
-            for track in top_tracks:
-                f.write("%s\n" % track)
-    _logger.info("FINISHED.")
+                # forward
+                if phase == 'val':
+                    with torch.no_grad():
+                        outputs = model(inputs)
+                else:
+                    outputs = model(inputs)
 
 
-if __name__ == "__main__":
-    FLAGS(sys.argv)
-    cfg = get_default_config()
-    cfg.merge_from_file(FLAGS.config_file)
-    cfg.NUM_GPU_PER_MACHINE = FLAGS.num_gpus
-    cfg.NUM_MACHINES = FLAGS.num_machines
-    cfg.LOCAL_MACHINE = FLAGS.local_machine
-    cfg.WORLD_SIZE = FLAGS.num_machines * FLAGS.num_gpus
-    cfg.EXPR_NAME = cfg.EXPR_NAME + "_" + datetime.now().strftime(
-        "%m_%d.%H:%M:%S.%f")
-    cfg.INIT_METHOD = "tcp://%s:%d" % (FLAGS.master_ip, FLAGS.master_port)
-    if cfg.TYPE == "TRAIN":
-        mp.spawn(train_model_on_dataset, args=(cfg,),
-                 nprocs=cfg.NUM_GPU_PER_MACHINE, join=True)
-    elif cfg.TYPE == "EVAL":
-        with open(cfg.EVAL.QUERY_JSON_PATH, "r") as f:
-            queries = json.load(f)
-        if os.path.isdir(cfg.EVAL.CONTINUE):
-            files = os.listdir(os.path.join(cfg.EVAL.CONTINUE, "logs"))
-            for q in files:
-                del queries[q.split(".")[0]]
-            cfg.EXPR_NAME = cfg.EVAL.CONTINUE.split("/")[-1]
-        mp.spawn(eval_model_on_dataset, args=(cfg, queries),
-                 nprocs=cfg.NUM_GPU_PER_MACHINE, join=True)
+                if opt.PCB:
+                    part = {}
+                    sm = nn.Softmax(dim=1)
+                    num_part = 6
+                    for i in range(num_part):
+                        part[i] = outputs[i]
+
+                    score = sm(part[0]) + sm(part[1]) +sm(part[2]) + sm(part[3]) +sm(part[4]) +sm(part[5])
+                    _, preds = torch.max(score.data, 1)
+
+                    loss = criterion(part[0], labels)
+                    for i in range(num_part-1):
+                        loss += criterion(part[i+1], labels)
+                elif opt.CPB:
+                    part = {}
+                    sm = nn.Softmax(dim=1)
+                    num_part = 4
+                    for i in range(num_part):
+                        part[i] = outputs[i]
+
+                    score = sm(part[0]) + sm(part[1]) +sm(part[2]) + sm(part[3]) 
+                    _, preds = torch.max(score.data, 1)
+
+                    loss = criterion(part[0], labels)
+                    for i in range(num_part-1):
+                        loss += criterion(part[i+1], labels)
+                elif opt.circle: 
+                    logits, ff = outputs
+                    fnorm = torch.norm(ff, p=2, dim=1, keepdim=True)
+                    ff = ff.div(fnorm.expand_as(ff))
+                    loss = criterion(logits, labels) + criterion_circle(*convert_label_to_similarity( ff, labels))/now_batch_size
+                    _, preds = torch.max(logits.data, 1)                        
+                else:
+                    loss = criterion(outputs, labels)
+                    if opt.angle or opt.arc:
+                        outputs = outputs[0]
+                    _, preds = torch.max(outputs.data, 1)
+
+                # backward + optimize only if in training phase
+                if epoch<opt.warm_epoch and phase == 'train': 
+                    warm_up = min(1.0, warm_up + 0.9 / warm_iteration)
+                    loss *= warm_up
+
+                # backward + optimize only if in training phase
+                if phase == 'train':
+                    if fp16: # we use optimier to backward loss
+                        with amp.scale_loss(loss, optimizer) as scaled_loss:
+                            scaled_loss.backward()
+                    else:
+                        loss.backward()
+                    optimizer.step()
+
+                #print('Iteration: loss:%.2f accuracy:%.2f'%(loss.item(), float(torch.sum(preds == labels.data))/now_batch_size ) )
+                # statistics
+                if int(version[0])>0 or int(version[2]) > 3: # for the new version like 0.4.0, 0.5.0 and 1.0.0
+                    running_loss += loss.item() * now_batch_size
+                else :  # for the old version like 0.3.0 and 0.3.1
+                    running_loss += loss.data[0] * now_batch_size
+                running_corrects += float(torch.sum(preds == labels.data))
+                
+                del(loss, outputs, inputs, preds)
+
+            epoch_loss = running_loss / dataset_sizes[phase]
+            epoch_acc = running_corrects / dataset_sizes[phase]
+            
+            print('{} Loss: {:.4f} Acc: {:.4f}'.format(
+                phase, epoch_loss, epoch_acc))
+            
+            y_loss[phase].append(epoch_loss)
+            y_err[phase].append(1.0-epoch_acc)            
+            # deep copy the model
+            if len(opt.gpu_ids)>1:
+                save_network(model.module, opt.name, epoch+1)
+            else:
+                save_network(model, opt.name, epoch+1)
+            draw_curve(epoch)
+
+        time_elapsed = time.time() - since
+        print('Training complete in {:.0f}m {:.0f}s'.format(
+            time_elapsed // 60, time_elapsed % 60))
+        print()
+        if epoch_loss < best_loss:
+            best_loss = epoch_loss
+            best_epoch = epoch
+            last_model_wts = model.state_dict()
+
+    time_elapsed = time.time() - since
+    print('Training complete in {:.0f}m {:.0f}s'.format(
+        time_elapsed // 60, time_elapsed % 60))
+    print('Best epoch: {:d} Best Train Loss: {:4f}'.format(best_epoch, best_loss))
+
+    # load best model weights
+    model.load_state_dict(last_model_wts)
+    save_network(model, opt.name, 'last')
+    return model
+
+
+######################################################################
+# Draw Curve
+#---------------------------
+x_epoch = []
+fig = plt.figure()
+ax0 = fig.add_subplot(121, title="loss")
+ax1 = fig.add_subplot(122, title="top1err")
+def draw_curve(current_epoch):
+    x_epoch.append(current_epoch)
+    ax0.plot(x_epoch, y_loss['train'], 'bo-', label='train')
+    #ax0.plot(x_epoch, y_loss['val'], 'ro-', label='val')
+    ax1.plot(x_epoch, y_err['train'], 'bo-', label='train')
+    #ax1.plot(x_epoch, y_err['val'], 'ro-', label='val')
+    if current_epoch == 0:
+        ax0.legend()
+        ax1.legend()
+    fig.savefig( os.path.join('./data/outputs',name,'train.png'))
+
+
+######################################################################
+# Finetuning the convnet
+# ----------------------
+#
+# Load a pretrainied model and reset final fully connected layer.
+#
+
+model = SiameseBaselineModel().cuda()
+
+if opt.init_name != 'imagenet':
+    old_opt = parser.parse_args()
+    init_model, old_opt, _ = load_network(opt.init_name, old_opt)
+    print(old_opt)
+    opt.stride = old_opt.stride
+    opt.pool = old_opt.pool
+    opt.use_dense = old_opt.use_dense
+    if opt.use_dense:
+        model = ft_net_dense(opt.nclasses, droprate=opt.droprate, stride=opt.stride, init_model=init_model, pool = opt.pool, circle = opt.circle)
+    else:
+        model = ft_net(opt.nclasses, droprate=opt.droprate, stride=opt.stride, init_model=init_model, pool = opt.pool, circle = opt.circle)
+
+
+##########################
+#Put model parameter in front of the optimizer!!!
+
+# For resume:
+if start_epoch>=60:
+    opt.lr = opt.lr*0.1
+if start_epoch>=75:
+    opt.lr = opt.lr*0.1
+
+model = torch.nn.DataParallel(model, device_ids=opt.gpu_ids).cuda()
+
+ignored_params = list(map(id, model.module.lang_fc.parameters() )) + list(map(id, model.module.resnet50.classifier.parameters() ))
+base_params = filter(lambda p: id(p) not in ignored_params, model.parameters())
+optimizer = torch.optim.SGD([
+             {'params': base_params, 'lr': 0.1*opt.lr,},
+             {'params': model.module.lang_fc.parameters(), 'lr': opt.lr,},
+             {'params': model.module.resnet50.classifier.parameters(), 'lr': opt.lr,}
+         ], weight_decay=5e-4, momentum=0.9, nesterov=True)
+if opt.adam:
+    optimizer_ft = optim.Adam(model.parameters(), opt.lr, weight_decay=5e-4)
+
+# Decay LR by a factor of 0.1 every 40 epochs
+#exp_lr_scheduler = lr_scheduler.StepLR(optimizer_ft, step_size=40, gamma=0.1)
+exp_lr_scheduler = lr_scheduler.MultiStepLR(optimizer_ft, milestones=[60-start_epoch, 75-start_epoch], gamma=0.1)
+
+######################################################################
+# Train and evaluate
+# ^^^^^^^^^^^^^^^^^^
+#
+# It should take around 1-2 hours on GPU. 
+#
+dir_name = os.path.join('./data/outputs',name)
+
+if not opt.resume:
+    if not os.path.isdir(dir_name):
+        os.mkdir(dir_name)
+#record every run
+    copyfile('./train.py', dir_name+'/train.py')
+    copyfile('./model.py', dir_name+'/model.py')
+# save opts
+    with open('%s/opts.yaml'%dir_name,'w') as fp:
+        yaml.dump(vars(opt), fp, default_flow_style=False)
+
+# model to gpu
+if fp16:
+    #model = network_to_half(model)
+    #optimizer_ft = FP16_Optimizer(optimizer_ft, dynamic_loss_scale=True)
+    model, optimizer_ft = amp.initialize(model, optimizer_ft, opt_level = "O1")
+
+
+if opt.angle:
+    criterion = AngleLoss()
+elif opt.arc:
+    criterion = ArcLoss()
+else:
+    criterion = nn.CrossEntropyLoss()
+
+print(model)
+model = train_model(model, criterion, optimizer_ft, exp_lr_scheduler,
+                    start_epoch=start_epoch, num_epochs=80)
+

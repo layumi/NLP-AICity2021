@@ -8,6 +8,7 @@ import os
 import random
 
 import cv2
+cv2.setNumThreads(0)
 from PIL import Image
 import torch
 import torchvision.transforms as transforms
