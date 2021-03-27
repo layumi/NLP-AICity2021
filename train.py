@@ -53,6 +53,7 @@ def train_model_on_dataset(rank, train_cfg):
                             world_size=train_cfg.WORLD_SIZE,
                             init_method=train_cfg.INIT_METHOD)
     dataset = CityFlowNLDataset(train_cfg.DATA)
+    dataset_size = len(dataset)
     model = SiameseBaselineModel(train_cfg.MODEL).cuda()
     model = DistributedDataParallel(model, device_ids=[rank],
                                     output_device=rank,
@@ -60,17 +61,18 @@ def train_model_on_dataset(rank, train_cfg):
     train_sampler = DistributedSampler(dataset)
     dataloader = DataLoader(dataset, batch_size=train_cfg.TRAIN.BATCH_SIZE,
                             num_workers=train_cfg.TRAIN.NUM_WORKERS,
-                            sampler=train_sampler)
+                            sampler=train_sampler, pin_memory=True, drop_last=True)
     #optimizer = torch.optim.SGD(
     #    params=model.parameters(),
     #    lr=train_cfg.TRAIN.LR.BASE_LR,
     #    momentum=train_cfg.TRAIN.LR.MOMENTUM)
     
-    ignored_params = list(map(id, model.lang_fc.parameters() )) + list(map(id, model.resnet50.classifier.parameters() ))
+    ignored_params = list(map(id, model.module.lang_fc.parameters() )) + list(map(id, model.module.resnet50.classifier.parameters() ))
     base_params = filter(lambda p: id(p) not in ignored_params, model.parameters())
-    optimizer_ft = optim.SGD([
+    optimizer = torch.optim.SGD([
              {'params': base_params, 'lr': 0.1*train_cfg.TRAIN.LR.BASE_LR,},
-             {'params': model.classifier.parameters(), 'lr': train_cfg.TRAIN.LR.BASE_LR,}
+             {'params': model.module.lang_fc.parameters(), 'lr': train_cfg.TRAIN.LR.BASE_LR,},
+             {'params': model.module.resnet50.classifier.parameters(), 'lr': train_cfg.TRAIN.LR.BASE_LR,}
          ], weight_decay=5e-4, momentum=0.9, nesterov=True)
     
     lr_scheduler = StepLR(optimizer,
@@ -88,6 +90,9 @@ def train_model_on_dataset(rank, train_cfg):
             f.write(train_cfg.dump())
 
     global_step = 0
+    warm_up = 0.1 # We start from the 0.1*lrRate
+    warm_iteration = round(dataset_size/train_cfg.TRAIN.BATCH_SIZE)*5 # first 5 epoch
+
     for epoch in range(train_cfg.TRAIN.START_EPOCH, train_cfg.TRAIN.EPOCH):
         if rank == 0:
             pbar = tqdm(total=len(dataloader), leave=False,
@@ -97,7 +102,12 @@ def train_model_on_dataset(rank, train_cfg):
         for data in dataloader:
             optimizer.zero_grad()
             loss = model.module.compute_loss(data)
+            #warm up first 5 epoch
+            if epoch<5: 
+                warm_up = min(1.0, warm_up + 0.9 / warm_iteration)
+                loss = loss*warm_up
             print(loss.data.item())
+
             if not (math.isnan(loss.data.item())
                     or math.isinf(loss.data.item())
                     or loss.data.item() > train_cfg.TRAIN.LOSS_CLIP_VALUE):

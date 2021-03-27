@@ -8,9 +8,11 @@ import os
 import random
 
 import cv2
+from PIL import Image
 import torch
+import torchvision.transforms as transforms
 from torch.utils.data import Dataset
-
+from auto_augment import AutoAugment, auto_augment_policy 
 from utils import get_logger
 
 
@@ -21,12 +23,16 @@ class CityFlowNLDataset(Dataset):
         :param data_cfg: CfgNode for CityFlow NL.
         """
         self.data_cfg = data_cfg.clone()
+        self.aug = AutoAugment(auto_augment_policy(name='v0r', hparams=None))
         with open(self.data_cfg.JSON_PATH) as f:
             tracks = json.load(f)
         self.list_of_uuids = list(tracks.keys())
         self.list_of_tracks = list(tracks.values())
         self.list_of_crops = list()
-        print('#track id: %d '%len(self.list_of_tracks))
+        self.transform = transforms.Compose(
+                       [transforms.ToTensor(),
+                        transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))]) 
+        print('#track id (class): %d '%len(self.list_of_tracks))
         for track_idx, track in enumerate(self.list_of_tracks):
             for frame_idx, frame in enumerate(track["frames"]):
                 frame_path = os.path.join(self.data_cfg.CITYFLOW_PATH, frame)
@@ -54,12 +60,21 @@ class CityFlowNLDataset(Dataset):
             label = 0
             crop = torch.randn(size=(3,) + self.data_cfg.CROP_SIZE)
         else:
-            frame = cv2.imread(dp["frame"])
+            frame = Image.open(dp["frame"]).convert('RGB')
             box = dp["box"]
-            crop = frame[box[1]:box[1] + box[3], box[0]: box[0] + box[2], :]
-            crop = cv2.resize(crop, dsize=self.data_cfg.CROP_SIZE)
-            crop = torch.from_numpy(crop).permute([2, 0, 1]).to(
-                dtype=torch.float32)
+            #try:
+            w = frame.size[0]
+            h = frame.size[1]
+            pad = 0
+            crop = frame.crop( (max(0, box[1]-pad) , max(0, box[0]-pad),
+               min(box[1] + box[3]+pad, w-1), min(box[0] + box[2]+pad, h-1) ))
+            #except:
+            #    print(dp["frame"])
+            crop = crop.resize(self.data_cfg.CROP_SIZE, Image.BICUBIC)
+            crop = self.aug(crop)
+            crop = self.transform(crop)
+            #crop = torch.from_numpy(crop).permute([2, 0, 1]).to(
+            #    dtype=torch.float32)
         dp["crop"] = crop
         dp["nl-id"] = dp["id"]
         nl_idx = int(random.uniform(0, 3))
@@ -67,7 +82,7 @@ class CityFlowNLDataset(Dataset):
         dp["label"] = torch.Tensor([label]).to(dtype=torch.float32)
         if label != 1:
             nsample = random.sample(self.list_of_crops, 1)
-            nl_idx = int(random.uniform(0, 3))
+            nl_idx = int(random.uniform(0, len(nsample[0]["nl"])))
             dp["nl"] = nsample[0]["nl"][nl_idx]
             dp["nl-id"] = nsample[0]["id"]
         return dp

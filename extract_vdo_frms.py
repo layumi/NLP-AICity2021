@@ -20,8 +20,10 @@ def main(args):
         check_and_create(path_images)
 
         vidcap = cv2.VideoCapture(path_vdo)
-        success, image = vidcap.read()
-
+        length = int(vidcap.get(cv2.CAP_PROP_FRAME_COUNT))
+        print(path_vdo, length)
+        #success, image = vidcap.read()
+        success = True
         count = 1
         output_iterator = []
         name_iterator = []
@@ -31,17 +33,19 @@ def main(args):
             if success: 
                 output_iterator.append(image)
                 name_iterator.append(path_image)
-            count += 1
-            if count%512==0 or success==False: 
+            if count%512==0 or count==length: 
                 with Pool(16) as p:
                     p.map(save, zip(output_iterator, name_iterator) )
                 output_iterator = []
                 name_iterator = []
+                print(count, success)
+            count += 1
+        vidcap.release()
 
 def save(inputs ):
     image, name = inputs
     cv2.imwrite(name, image)
-    print('Data path: %s' % name)
+    #print('Data path: %s' % name)
 
 
 if __name__ == '__main__':
