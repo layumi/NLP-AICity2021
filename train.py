@@ -40,6 +40,9 @@ except ImportError: # will be 3.x series
 # make the output
 if not os.path.isdir('./data/outputs'):
     os.mkdir('./data/outputs')
+
+
+os.environ["TOKENIZERS_PARALLELISM"] = "false"
 ######################################################################
 # Options
 # --------
@@ -141,12 +144,16 @@ def compute_loss(model, input_ids, attention_mask, crop, nl_id, crop_id, label):
     #print(similarity.shape, predict_class_v.shape, predict_class_l.shape)
     #print(label.shape, nl_id.shape)
     label = label.float()
-    loss = F.binary_cross_entropy(similarity, label.cuda()) \
-             + F.cross_entropy(predict_class_v, crop_id.cuda())\
-             + F.cross_entropy(predict_class_l, nl_id.cuda())
-    return loss
+    loss_con = F.binary_cross_entropy(similarity, label.cuda())/opt.batchsize
+    loss_cv =  F.cross_entropy(predict_class_v, crop_id.cuda())
+    loss_nl =  F.cross_entropy(predict_class_l, nl_id.cuda())
+    loss_total = loss_con + loss_cv + loss_nl
+    print('\r\rtotal: %.4f  loss_con:%.4f loss_cv: %.4f loss_nl:%.4f'%(loss_total, loss_con, loss_cv, loss_nl), end="" )
+    return loss_total
+
 
 def train_model(model, criterion, optimizer, scheduler, start_epoch=0, num_epochs=25):
+    bert_tokenizer = AutoTokenizer.from_pretrained("roberta-base")
     since = time.time()
 
     warm_up = 0.1 # We start from the 0.1*lrRate
@@ -157,7 +164,6 @@ def train_model(model, criterion, optimizer, scheduler, start_epoch=0, num_epoch
     best_model_wts = model.state_dict()
     best_loss = 9999
     best_epoch = 0
-    
     if opt.circle:
         criterion_circle = CircleLoss(m=0.25, gamma=32)
         
@@ -182,7 +188,7 @@ def train_model(model, criterion, optimizer, scheduler, start_epoch=0, num_epoch
                 for data in tq:
                 # zero the parameter gradients
                     nl, crop, nl_id, crop_id, label = data
-                    tokens = model.module.bert_tokenizer.batch_encode_plus(nl, padding='longest',
+                    tokens = bert_tokenizer.batch_encode_plus(nl, padding='longest',
                                                        return_tensors='pt')
 
                     optimizer.zero_grad()
@@ -191,7 +197,6 @@ def train_model(model, criterion, optimizer, scheduler, start_epoch=0, num_epoch
                     if epoch<opt.warm_epoch and phase == 'train': 
                         warm_up = min(1.0, warm_up + 0.9 / warm_iteration)
                         loss *= warm_up
-
                 # backward + optimize only if in training phase
                     if phase == 'train':
                         if fp16: # we use optimier to backward loss
@@ -208,8 +213,7 @@ def train_model(model, criterion, optimizer, scheduler, start_epoch=0, num_epoch
                         running_loss += loss.data[0] * now_batch_size
                 
                     del(loss, tokens, data, nl, crop, nl_id, crop_id, label)
-
-            epoch_loss = running_loss / dataset_sizes[phase]
+            epoch_loss = running_loss / dataset_size
             
             print('{} Loss: {:.4f}'.format(
                 phase, epoch_loss))
@@ -219,7 +223,8 @@ def train_model(model, criterion, optimizer, scheduler, start_epoch=0, num_epoch
             #if len(opt.gpu_ids)>1:
             #    save_network(model.module, opt.name, epoch+1)
             #else:
-            save_network(model, opt.name, epoch+1)
+            if epoch %5 ==0:
+                save_network(model, opt.name, epoch+1)
             draw_curve(epoch)
 
         time_elapsed = time.time() - since

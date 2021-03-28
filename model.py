@@ -97,7 +97,7 @@ class ClassBlock(nn.Module):
 # Define the ResNet50-based Model
 class ft_net(nn.Module):
 
-    def __init__(self, class_num, droprate=0.5, stride=2, init_model=None, pool='avg', circle=False):
+    def __init__(self, class_num, droprate=0.5, stride=2, init_model=None, pool='avg+max', circle=False):
         super(ft_net, self).__init__()
         model_ft = models.resnet50(pretrained=True)
         # avg pooling to global pooling

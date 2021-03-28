@@ -12,18 +12,19 @@ import random
 import copy
 from PIL import Image
 import torch
+import math
 import torchvision.transforms as transforms
 from torch.utils.data import Dataset
 from auto_augment import AutoAugment, auto_augment_policy 
 from utils import get_logger
-from transformers import AutoTokenizer
 
 class CityFlowNLDataset(Dataset):
-    def __init__(self, data_cfg):
+    def __init__(self, data_cfg, multi=10):
         """
         Dataset for training.
         :param data_cfg: CfgNode for CityFlow NL.
         """
+        self.multi = multi
         self.data_cfg = data_cfg
         self.aug = AutoAugment(auto_augment_policy(name='v0r', hparams=None))
         with open(self.data_cfg.JSON_PATH) as f:
@@ -47,29 +48,32 @@ class CityFlowNLDataset(Dataset):
         self._logger = get_logger()
 
     def __len__(self):
-        return len(self.list_of_crops)
+        return len(self.list_of_tracks)*self.multi
 
     def __getitem__(self, index):
         """
         Get pairs of NL and cropped frame.
         """
+        index = math.ceil(index/self.multi) 
         if random.uniform(0, 1) > self.data_cfg.POSITIVE_THRESHOLD:
             label = 1 #positive
         else:
             label = 0 #negative
-        dp = self.list_of_crops[index]
-        if not os.path.isfile(dp["frame"]):
-            self._logger.warning("Missing Image File: %s" % dp["frame"])
+        track = self.list_of_tracks[index]
+        frame_idx = int(random.uniform(0, len((track["frames"]))))
+        frame_path = os.path.join(self.data_cfg.CITYFLOW_PATH, track["frames"][frame_idx])
+        if not os.path.isfile(frame_path):
+            self._logger.warning("Missing Image File: %s" % track["frames"][frame_idx])
             label = 0
             crop = torch.randn(size=(3,) + self.data_cfg.CROP_SIZE)
         else:
-            frame = Image.open(dp["frame"]).convert('RGB')
-            box = dp["box"]
+            frame = Image.open(frame_path).convert('RGB')
+            box = track["boxes"][frame_idx]
             #try:
             w = frame.size[0]
             h = frame.size[1]
             pad = 5
-            crop_id =  dp["track_id"]
+            crop_id =  index # dp["track_id"]
             crop = frame.crop( (max(0, box[1]-pad) , max(0, box[0]-pad),
                min(box[1] + box[3]+pad, w-1), min(box[0] + box[2]+pad, h-1) ))
             frame.close() # clean
@@ -78,9 +82,9 @@ class CityFlowNLDataset(Dataset):
             crop = self.transform(crop)
             #crop = torch.from_numpy(crop).permute([2, 0, 1]).to(
             #    dtype=torch.float32)
-        nl_id = dp["track_id"]
+        nl_id = index #dp["track_id"]
         nl_idx = int(random.uniform(0, 3))
-        nl = dp["nl"][nl_idx]
+        nl = track["nl"][nl_idx]
         if label != 1:
             nsample = random.sample(self.list_of_crops, 1)
             nl_idx = int(random.uniform(0, len(nsample[0]["nl"])))
