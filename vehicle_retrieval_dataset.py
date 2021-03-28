@@ -7,15 +7,15 @@ import json
 import os
 import random
 
-import cv2
-cv2.setNumThreads(0)
+#import cv2
+#cv2.setNumThreads(0)
 from PIL import Image
 import torch
 import torchvision.transforms as transforms
 from torch.utils.data import Dataset
 from auto_augment import AutoAugment, auto_augment_policy 
 from utils import get_logger
-
+from transformers import AutoTokenizer
 
 class CityFlowNLDataset(Dataset):
     def __init__(self, data_cfg):
@@ -23,10 +23,11 @@ class CityFlowNLDataset(Dataset):
         Dataset for training.
         :param data_cfg: CfgNode for CityFlow NL.
         """
-        self.data_cfg = data_cfg.clone()
+        self.data_cfg = data_cfg
         self.aug = AutoAugment(auto_augment_policy(name='v0r', hparams=None))
         with open(self.data_cfg.JSON_PATH) as f:
             tracks = json.load(f)
+        f.close()
         self.list_of_uuids = list(tracks.keys())
         self.list_of_tracks = list(tracks.values())
         self.list_of_crops = list()
@@ -43,6 +44,7 @@ class CityFlowNLDataset(Dataset):
                 crop = {"id": track_idx, "frame": frame_path, "nl": nl, "box": box}
                 self.list_of_crops.append(crop)
         self._logger = get_logger()
+        self.bert_tokenizer = AutoTokenizer.from_pretrained("bert-base-uncased")
 
     def __len__(self):
         return len(self.list_of_crops)
@@ -66,12 +68,11 @@ class CityFlowNLDataset(Dataset):
             #try:
             w = frame.size[0]
             h = frame.size[1]
-            pad = 0
+            pad = 5
             crop = frame.crop( (max(0, box[1]-pad) , max(0, box[0]-pad),
                min(box[1] + box[3]+pad, w-1), min(box[0] + box[2]+pad, h-1) ))
-            #except:
-            #    print(dp["frame"])
-            crop = crop.resize(self.data_cfg.CROP_SIZE, Image.BICUBIC)
+            del frame # clean
+            crop = crop.resize((self.data_cfg.CROP_SIZE, self.data_cfg.CROP_SIZE) , Image.BICUBIC)
             crop = self.aug(crop)
             crop = self.transform(crop)
             #crop = torch.from_numpy(crop).permute([2, 0, 1]).to(
@@ -80,12 +81,14 @@ class CityFlowNLDataset(Dataset):
         dp["nl-id"] = dp["id"]
         nl_idx = int(random.uniform(0, 3))
         dp["nl"] = dp["nl"][nl_idx]
-        dp["label"] = torch.Tensor([label]).to(dtype=torch.float32)
+        dp["label"] = torch.Tensor([label]).to(dtype=torch.float32) # only 0,1
         if label != 1:
             nsample = random.sample(self.list_of_crops, 1)
             nl_idx = int(random.uniform(0, len(nsample[0]["nl"])))
             dp["nl"] = nsample[0]["nl"][nl_idx]
             dp["nl-id"] = nsample[0]["id"]
+        dp["nl"] = '[CLS]' + dp["nl"] + '[SEP]'
+        #dp["token"] = self.bert_tokenizer.batch_encode_plus([dp["nl"]], padding='longest',return_tensors='pt')
         return dp
 
 
@@ -117,12 +120,24 @@ class CityFlowNLInferenceDataset(Dataset):
             frame_path = os.path.join(self.data_cfg.CITYFLOW_PATH, frame_path)
             if not os.path.isfile(frame_path):
                 continue
-            frame = cv2.imread(frame_path)
-            box = dp["boxes"][frame_idx]
-            crop = frame[box[1]:box[1] + box[3], box[0]: box[0] + box[2], :]
-            crop = cv2.resize(crop, dsize=self.data_cfg.CROP_SIZE)
-            crop = torch.from_numpy(crop).permute([2, 0, 1]).to(
-                dtype=torch.float32)
+            #frame = cv2.imread(frame_path)
+            #box = dp["boxes"][frame_idx]
+            #crop = frame[box[1]:box[1] + box[3], box[0]: box[0] + box[2], :]
+            #crop = cv2.resize(crop, dsize=self.data_cfg.CROP_SIZE)
+            #crop = torch.from_numpy(crop).permute([2, 0, 1]).to(
+            #    dtype=torch.float32)
+            frame = Image.open(dp["frame"]).convert('RGB')
+            box = dp["box"]
+            #try:
+            w = frame.size[0]
+            h = frame.size[1]
+            pad = 5
+            crop = frame.crop( (max(0, box[1]-pad) , max(0, box[0]-pad),
+               min(box[1] + box[3]+pad, w-1), min(box[0] + box[2]+pad, h-1) ))
+            #except:
+            #    print(dp["frame"])
+            crop = crop.resize((self.data_cfg.CROP_SIZE, self.data_cfg.CROP_SIZE) , Image.BICUBIC)
+            crop = self.transform(crop)
             cropped_frames.append(crop)
         dp["crops"] = torch.stack(cropped_frames, dim=0)
         return dp

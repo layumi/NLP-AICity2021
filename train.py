@@ -10,11 +10,13 @@ from torch.optim import lr_scheduler
 from torch.autograd import Variable
 from torchvision import datasets, transforms
 import torch.backends.cudnn as cudnn
+import torch.nn.functional as F
 import matplotlib
 matplotlib.use('agg')
 import matplotlib.pyplot as plt
 #from PIL import Image
 import time
+from tqdm import tqdm
 import os
 from siamese_baseline_model import SiameseBaselineModel
 from vehicle_retrieval_dataset import CityFlowNLDataset
@@ -22,7 +24,8 @@ from vehicle_retrieval_dataset import CityFlowNLInferenceDataset
 import yaml
 from shutil import copyfile
 import random
-from autoaugment import ImageNetPolicy
+from DeBERTa import deberta
+from transformers import AutoTokenizer
 from utils import get_model_list, load_network, save_network, make_weights_for_balanced_classes
 from circle_loss import CircleLoss, convert_label_to_similarity
 
@@ -45,24 +48,20 @@ parser.add_argument('--gpu_ids',default='0', type=str,help='gpu_ids: e.g. 0  0,1
 parser.add_argument('--adam', action='store_true', help='use all training data' )
 parser.add_argument('--name',default='ft_ResNet50', type=str, help='output model name')
 parser.add_argument('--init_name',default='imagenet', type=str, help='initial with ImageNet')
-parser.add_argument('--data_dir',default='./data/pytorch2021',type=str, help='training dir path')
+parser.add_argument('--CITYFLOW_PATH',default="data/cityflow/MTMC",type=str, help='training dir path')
+parser.add_argument('--JSON_PATH',default="data/train-tracks.json",type=str, help='training dir path')
+parser.add_argument('--EVAL_TRACKS_JSON_PATH',default="data/test-tracks.json",type=str, help='training dir path')
+parser.add_argument('--CROP_SIZE', default=256, type=int, help='batchsize')
+parser.add_argument('--POSITIVE_THRESHOLD', default=0.5, type=float, help='batchsize')
 parser.add_argument('--color_jitter', action='store_true', help='use color jitter in training' )
-parser.add_argument('--batchsize', default=32, type=int, help='batchsize')
-parser.add_argument('--inputsize', default=299, type=int, help='batchsize')
+parser.add_argument('--batchsize', default=12, type=int, help='batchsize')
 parser.add_argument('--h', default=299, type=int, help='height')
 parser.add_argument('--w', default=299, type=int, help='width')
 parser.add_argument('--stride', default=2, type=int, help='stride')
 parser.add_argument('--pool',default='avg', type=str, help='last pool')
 parser.add_argument('--autoaug', action='store_true', help='use Color Data Augmentation' )
 parser.add_argument('--erasing_p', default=0, type=float, help='Random Erasing probability, in [0,1]')
-parser.add_argument('--use_dense', action='store_true', help='use densenet121' )
-parser.add_argument('--use_NAS', action='store_true', help='use nasnetalarge' )
-parser.add_argument('--use_SE', action='store_true', help='use se_resnext101_32x4d' )
-parser.add_argument('--use_DSE', action='store_true', help='use senet154' )
-parser.add_argument('--use_IR', action='store_true', help='use InceptionResNetv2' )
-parser.add_argument('--use_EF4', action='store_true', help='use EF4' )
-parser.add_argument('--use_EF5', action='store_true', help='use EF5' )
-parser.add_argument('--use_EF6', action='store_true', help='use EF6' )
+parser.add_argument('--deberta', action='store_true', help='use deberta' )
 parser.add_argument('--lr', default=0.05, type=float, help='learning rate')
 parser.add_argument('--droprate', default=0.5, type=float, help='drop rate')
 parser.add_argument('--PCB', action='store_true', help='use PCB+ResNet50' )
@@ -86,7 +85,6 @@ print(start_epoch)
 
 
 fp16 = opt.fp16
-data_dir = opt.data_dir
 name = opt.name
 
 if not opt.resume:
@@ -107,9 +105,9 @@ if len(opt.gpu_ids)>0:
 # ---------
 #
 
-dataset = CityFlowNLDataset(train_cfg.DATA)
+dataset = CityFlowNLDataset(opt)
 dataset_size = len(dataset)
-dataloader = DataLoader(dataset, batch_size=opt.batchsize,
+dataloader = torch.utils.data.DataLoader(dataset, batch_size=opt.batchsize,
                             num_workers=4, pin_memory=True, drop_last=True)
 
 use_gpu = torch.cuda.is_available()
@@ -138,13 +136,20 @@ y_err = {}
 y_err['train'] = []
 y_err['val'] = []
 
+def compute_loss(model, input_ids, attention_mask, crop, track):
+    similarity, predict_class_v, predict_class_l = model.forward(input_ids, attention_mask, crop)
+    loss = F.binary_cross_entropy(similarity, track["label"][:, 0].cuda())\
+              + F.cross_entropy(predict_class_v, track["id"].cuda())\
+              + F.cross_entropy(predict_class_l, track["nl-id"].cuda())
+    return loss
+
 def train_model(model, criterion, optimizer, scheduler, start_epoch=0, num_epochs=25):
     since = time.time()
 
     warm_up = 0.1 # We start from the 0.1*lrRate
     gamma = 0.0 #auto_aug
-    warm_iteration = round(dataset_sizes['train']/opt.batchsize)*opt.warm_epoch # first 5 epoch
-    total_iteration = round(dataset_sizes['train']/opt.batchsize)*num_epochs
+    warm_iteration = round(dataset_size/opt.batchsize)*opt.warm_epoch # first 5 epoch
+    total_iteration = round(dataset_size/opt.batchsize)*num_epochs
 
     best_model_wts = model.state_dict()
     best_loss = 9999
@@ -170,116 +175,48 @@ def train_model(model, criterion, optimizer, scheduler, start_epoch=0, num_epoch
             running_loss = 0.0
             running_corrects = 0.0
             # Iterate over data.
-            for data in dataloaders[phase]:
-                # get the inputs
-                if opt.autoaug:
-                    inputs, inputs2, labels = data
-                    if random.uniform(0, 1)> gamma:
-                        inputs = inputs2
-                    gamma = min(1.0, gamma + 1.0 / total_iteration)
-                else:
-                    inputs, labels = data
-
-                now_batch_size,c,h,w = inputs.shape
-                if now_batch_size<opt.batchsize: # skip the last batch
-                    continue
-                #print(inputs.shape)
-                # wrap them in Variable
-                if use_gpu:
-                    inputs = Variable(inputs.cuda().detach())
-                    labels = Variable(labels.cuda().detach())
-                else:
-                    inputs, labels = Variable(inputs), Variable(labels)
-                # if we use low precision, input also need to be fp16
-                #if fp16:
-                #    inputs = inputs.half()
- 
+            with tqdm(dataloader, ascii=True) as tq:
+                for data in tq:
                 # zero the parameter gradients
-                optimizer.zero_grad()
+                    nl = data["nl"]
+                    tokens = model.module.bert_tokenizer.batch_encode_plus(nl, padding='longest',
+                                                       return_tensors='pt')
 
-                # forward
-                if phase == 'val':
-                    with torch.no_grad():
-                        outputs = model(inputs)
-                else:
-                    outputs = model(inputs)
-
-
-                if opt.PCB:
-                    part = {}
-                    sm = nn.Softmax(dim=1)
-                    num_part = 6
-                    for i in range(num_part):
-                        part[i] = outputs[i]
-
-                    score = sm(part[0]) + sm(part[1]) +sm(part[2]) + sm(part[3]) +sm(part[4]) +sm(part[5])
-                    _, preds = torch.max(score.data, 1)
-
-                    loss = criterion(part[0], labels)
-                    for i in range(num_part-1):
-                        loss += criterion(part[i+1], labels)
-                elif opt.CPB:
-                    part = {}
-                    sm = nn.Softmax(dim=1)
-                    num_part = 4
-                    for i in range(num_part):
-                        part[i] = outputs[i]
-
-                    score = sm(part[0]) + sm(part[1]) +sm(part[2]) + sm(part[3]) 
-                    _, preds = torch.max(score.data, 1)
-
-                    loss = criterion(part[0], labels)
-                    for i in range(num_part-1):
-                        loss += criterion(part[i+1], labels)
-                elif opt.circle: 
-                    logits, ff = outputs
-                    fnorm = torch.norm(ff, p=2, dim=1, keepdim=True)
-                    ff = ff.div(fnorm.expand_as(ff))
-                    loss = criterion(logits, labels) + criterion_circle(*convert_label_to_similarity( ff, labels))/now_batch_size
-                    _, preds = torch.max(logits.data, 1)                        
-                else:
-                    loss = criterion(outputs, labels)
-                    if opt.angle or opt.arc:
-                        outputs = outputs[0]
-                    _, preds = torch.max(outputs.data, 1)
+                    optimizer.zero_grad()
+                    loss = compute_loss(model, tokens['input_ids'].cuda(), tokens['attention_mask'].cuda(), data["crop"].cuda(), data)
+                # backward + optimize only if in training phase
+                    if epoch<opt.warm_epoch and phase == 'train': 
+                        warm_up = min(1.0, warm_up + 0.9 / warm_iteration)
+                        loss *= warm_up
 
                 # backward + optimize only if in training phase
-                if epoch<opt.warm_epoch and phase == 'train': 
-                    warm_up = min(1.0, warm_up + 0.9 / warm_iteration)
-                    loss *= warm_up
+                    if phase == 'train':
+                        if fp16: # we use optimier to backward loss
+                            with amp.scale_loss(loss, optimizer) as scaled_loss:
+                                scaled_loss.backward()
+                        else:
+                            loss.backward()
+                        optimizer.step()
 
-                # backward + optimize only if in training phase
-                if phase == 'train':
-                    if fp16: # we use optimier to backward loss
-                        with amp.scale_loss(loss, optimizer) as scaled_loss:
-                            scaled_loss.backward()
-                    else:
-                        loss.backward()
-                    optimizer.step()
-
-                #print('Iteration: loss:%.2f accuracy:%.2f'%(loss.item(), float(torch.sum(preds == labels.data))/now_batch_size ) )
                 # statistics
-                if int(version[0])>0 or int(version[2]) > 3: # for the new version like 0.4.0, 0.5.0 and 1.0.0
-                    running_loss += loss.item() * now_batch_size
-                else :  # for the old version like 0.3.0 and 0.3.1
-                    running_loss += loss.data[0] * now_batch_size
-                running_corrects += float(torch.sum(preds == labels.data))
+                    if int(version[0])>0 or int(version[2]) > 3: # for the new version like 0.4.0, 0.5.0 and 1.0.0
+                        running_loss += loss.item() * opt.batchsize
+                    else :  # for the old version like 0.3.0 and 0.3.1
+                        running_loss += loss.data[0] * now_batch_size
                 
-                del(loss, outputs, inputs, preds)
+                    del(loss, tokens, data)
 
             epoch_loss = running_loss / dataset_sizes[phase]
-            epoch_acc = running_corrects / dataset_sizes[phase]
             
-            print('{} Loss: {:.4f} Acc: {:.4f}'.format(
-                phase, epoch_loss, epoch_acc))
+            print('{} Loss: {:.4f}'.format(
+                phase, epoch_loss))
             
             y_loss[phase].append(epoch_loss)
-            y_err[phase].append(1.0-epoch_acc)            
             # deep copy the model
-            if len(opt.gpu_ids)>1:
-                save_network(model.module, opt.name, epoch+1)
-            else:
-                save_network(model, opt.name, epoch+1)
+            #if len(opt.gpu_ids)>1:
+            #    save_network(model.module, opt.name, epoch+1)
+            #else:
+            save_network(model, opt.name, epoch+1)
             draw_curve(epoch)
 
         time_elapsed = time.time() - since
@@ -313,11 +250,11 @@ def draw_curve(current_epoch):
     x_epoch.append(current_epoch)
     ax0.plot(x_epoch, y_loss['train'], 'bo-', label='train')
     #ax0.plot(x_epoch, y_loss['val'], 'ro-', label='val')
-    ax1.plot(x_epoch, y_err['train'], 'bo-', label='train')
+    #ax1.plot(x_epoch, y_err['train'], 'bo-', label='train')
     #ax1.plot(x_epoch, y_err['val'], 'ro-', label='val')
     if current_epoch == 0:
         ax0.legend()
-        ax1.legend()
+        #ax1.legend()
     fig.savefig( os.path.join('./data/outputs',name,'train.png'))
 
 
@@ -328,7 +265,7 @@ def draw_curve(current_epoch):
 # Load a pretrainied model and reset final fully connected layer.
 #
 
-model = SiameseBaselineModel().cuda()
+model = SiameseBaselineModel(opt).cuda()
 
 if opt.init_name != 'imagenet':
     old_opt = parser.parse_args()
@@ -353,6 +290,9 @@ if start_epoch>=75:
     opt.lr = opt.lr*0.1
 
 model = torch.nn.DataParallel(model, device_ids=opt.gpu_ids).cuda()
+#model.resnet50 = torch.nn.DataParallel(model.resnet50, device_ids=opt.gpu_ids).cuda()
+#model.bert_model = torch.nn.DataParallel(model.bert_model, device_ids=opt.gpu_ids).cuda()
+#model.lang_fc = torch.nn.DataParallel(model.lang_fc, device_ids=opt.gpu_ids).cuda()
 
 ignored_params = list(map(id, model.module.lang_fc.parameters() )) + list(map(id, model.module.resnet50.classifier.parameters() ))
 base_params = filter(lambda p: id(p) not in ignored_params, model.parameters())
@@ -366,7 +306,7 @@ if opt.adam:
 
 # Decay LR by a factor of 0.1 every 40 epochs
 #exp_lr_scheduler = lr_scheduler.StepLR(optimizer_ft, step_size=40, gamma=0.1)
-exp_lr_scheduler = lr_scheduler.MultiStepLR(optimizer_ft, milestones=[60-start_epoch, 75-start_epoch], gamma=0.1)
+exp_lr_scheduler = lr_scheduler.MultiStepLR(optimizer, milestones=[60-start_epoch, 75-start_epoch], gamma=0.1)
 
 ######################################################################
 # Train and evaluate
@@ -390,7 +330,7 @@ if not opt.resume:
 if fp16:
     #model = network_to_half(model)
     #optimizer_ft = FP16_Optimizer(optimizer_ft, dynamic_loss_scale=True)
-    model, optimizer_ft = amp.initialize(model, optimizer_ft, opt_level = "O1")
+    model, optimizer = amp.initialize(model, optimizer, opt_level = "O1")
 
 
 if opt.angle:
@@ -401,6 +341,6 @@ else:
     criterion = nn.CrossEntropyLoss()
 
 print(model)
-model = train_model(model, criterion, optimizer_ft, exp_lr_scheduler,
+model = train_model(model, criterion, optimizer, exp_lr_scheduler,
                     start_epoch=start_epoch, num_epochs=80)
 
