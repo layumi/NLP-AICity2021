@@ -136,11 +136,14 @@ y_err = {}
 y_err['train'] = []
 y_err['val'] = []
 
-def compute_loss(model, input_ids, attention_mask, crop, track):
+def compute_loss(model, input_ids, attention_mask, crop, nl_id, crop_id, label):
     similarity, predict_class_v, predict_class_l = model.forward(input_ids, attention_mask, crop)
-    loss = F.binary_cross_entropy(similarity, track["label"][:, 0].cuda())\
-              + F.cross_entropy(predict_class_v, track["id"].cuda())\
-              + F.cross_entropy(predict_class_l, track["nl-id"].cuda())
+    #print(similarity.shape, predict_class_v.shape, predict_class_l.shape)
+    #print(label.shape, nl_id.shape)
+    label = label.float()
+    loss = F.binary_cross_entropy(similarity, label.cuda()) \
+             + F.cross_entropy(predict_class_v, crop_id.cuda())\
+             + F.cross_entropy(predict_class_l, nl_id.cuda())
     return loss
 
 def train_model(model, criterion, optimizer, scheduler, start_epoch=0, num_epochs=25):
@@ -178,12 +181,12 @@ def train_model(model, criterion, optimizer, scheduler, start_epoch=0, num_epoch
             with tqdm(dataloader, ascii=True) as tq:
                 for data in tq:
                 # zero the parameter gradients
-                    nl = data["nl"]
+                    nl, crop, nl_id, crop_id, label = data
                     tokens = model.module.bert_tokenizer.batch_encode_plus(nl, padding='longest',
                                                        return_tensors='pt')
 
                     optimizer.zero_grad()
-                    loss = compute_loss(model, tokens['input_ids'].cuda(), tokens['attention_mask'].cuda(), data["crop"].cuda(), data)
+                    loss = compute_loss(model, tokens['input_ids'].cuda(), tokens['attention_mask'].cuda(), crop.cuda(), nl_id, crop_id, label)
                 # backward + optimize only if in training phase
                     if epoch<opt.warm_epoch and phase == 'train': 
                         warm_up = min(1.0, warm_up + 0.9 / warm_iteration)
@@ -204,7 +207,7 @@ def train_model(model, criterion, optimizer, scheduler, start_epoch=0, num_epoch
                     else :  # for the old version like 0.3.0 and 0.3.1
                         running_loss += loss.data[0] * now_batch_size
                 
-                    del(loss, tokens, data)
+                    del(loss, tokens, data, nl, crop, nl_id, crop_id, label)
 
             epoch_loss = running_loss / dataset_sizes[phase]
             

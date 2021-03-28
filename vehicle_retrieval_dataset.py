@@ -9,6 +9,7 @@ import random
 
 #import cv2
 #cv2.setNumThreads(0)
+import copy
 from PIL import Image
 import torch
 import torchvision.transforms as transforms
@@ -41,10 +42,9 @@ class CityFlowNLDataset(Dataset):
                 #nl_idx = int(random.uniform(0, 3))
                 nl = track["nl"]#[nl_idx]
                 box = track["boxes"][frame_idx]
-                crop = {"id": track_idx, "frame": frame_path, "nl": nl, "box": box}
+                crop = {"track_id": track_idx, "frame": frame_path, "nl": nl, "box": box}
                 self.list_of_crops.append(crop)
         self._logger = get_logger()
-        self.bert_tokenizer = AutoTokenizer.from_pretrained("bert-base-uncased")
 
     def __len__(self):
         return len(self.list_of_crops)
@@ -69,27 +69,28 @@ class CityFlowNLDataset(Dataset):
             w = frame.size[0]
             h = frame.size[1]
             pad = 5
+            crop_id =  dp["track_id"]
             crop = frame.crop( (max(0, box[1]-pad) , max(0, box[0]-pad),
                min(box[1] + box[3]+pad, w-1), min(box[0] + box[2]+pad, h-1) ))
-            del frame # clean
+            frame.close() # clean
             crop = crop.resize((self.data_cfg.CROP_SIZE, self.data_cfg.CROP_SIZE) , Image.BICUBIC)
             crop = self.aug(crop)
             crop = self.transform(crop)
             #crop = torch.from_numpy(crop).permute([2, 0, 1]).to(
             #    dtype=torch.float32)
-        dp["crop"] = crop
-        dp["nl-id"] = dp["id"]
+        nl_id = dp["track_id"]
         nl_idx = int(random.uniform(0, 3))
-        dp["nl"] = dp["nl"][nl_idx]
-        dp["label"] = torch.Tensor([label]).to(dtype=torch.float32) # only 0,1
+        nl = dp["nl"][nl_idx]
         if label != 1:
             nsample = random.sample(self.list_of_crops, 1)
             nl_idx = int(random.uniform(0, len(nsample[0]["nl"])))
-            dp["nl"] = nsample[0]["nl"][nl_idx]
-            dp["nl-id"] = nsample[0]["id"]
-        dp["nl"] = '[CLS]' + dp["nl"] + '[SEP]'
+            nl = nsample[0]["nl"][nl_idx]
+            nl_id = nsample[0]["track_id"]
+            del nsample
+        nl = '[CLS]' + nl + '[SEP]'
+        #label = torch.Tensor([label]).to(dtype=torch.float32) # only 0,1
         #dp["token"] = self.bert_tokenizer.batch_encode_plus([dp["nl"]], padding='longest',return_tensors='pt')
-        return dp
+        return nl, crop, nl_id, crop_id, label
 
 
 class CityFlowNLInferenceDataset(Dataset):
