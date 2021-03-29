@@ -126,9 +126,6 @@ class CityFlowNLInferenceDataset(Dataset):
                min(box[0] + box[2]+pad, w-1), min(box[1] + box[3]+pad, h-1)))
         frame.close()
         if frame_idx == 0:
-            print(box)
-            print(w,h, max(1, box[1]-pad), max(1, box[0]-pad),
-               min(box[1] + box[3]+pad, w-1), min(box[0] + box[2]+pad, h-1))
             save_path = './crops/%s.jpg'%self.one_id
             crop.save(save_path)
         crop = crop.resize((self.data_cfg.CROP_SIZE, self.data_cfg.CROP_SIZE) , Image.BICUBIC)
