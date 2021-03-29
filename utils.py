@@ -15,6 +15,7 @@ import torch.nn as nn
 import parser
 import swa_utils
 from model import ft_net, ft_net_dense, ft_net_EF4, ft_net_EF5, ft_net_EF6, ft_net_IR, ft_net_NAS, ft_net_SE, ft_net_DSE, PCB, CPB, ft_net_angle, ft_net_arc
+from siamese_baseline_model import SiameseBaselineModel
 
 def make_weights_for_balanced_classes(images, nclasses):
     count = [0] * nclasses
@@ -72,75 +73,27 @@ def load_network(name, opt):
         config = yaml.load(stream)
 
     opt.name = config['name']
-    opt.inputsize = config['inputsize']
-    opt.data_dir = config['data_dir']
-    opt.train_all = config['train_all']
-    opt.train_veri = config['train_veri']
-    opt.train_comp = config['train_comp']
-    opt.train_comp_veri = config['train_comp_veri']
+    opt.CROP_SIZE = config['CROP_SIZE']
+    opt.CITYFLOW_PATH = config['CITYFLOW_PATH']
+    opt.JSON_PATH = config['JSON_PATH']
     opt.droprate = config['droprate']
     opt.color_jitter = config['color_jitter']
     opt.batchsize = config['batchsize']
-    opt.inputsize = config['inputsize']
     opt.stride = config['stride']
-  
-    if 'pool' in config:
-        opt.pool = config['pool']
-    if 'use_DSE' in config:
-        opt.use_DSE = config['use_DSE']
-    if 'use_EF4' in config:
-        opt.use_EF4 = config['use_EF4']
-        opt.use_EF5 = config['use_EF5']
-        opt.use_EF6 = config['use_EF6']
-    if 'h' in config:
-        opt.h = config['h']
-        opt.w = config['w']
-    if 'gpu_ids' in config:
-        opt.gpu_ids = config['gpu_ids']
+    opt.pool = config['pool']
+    opt.h = config['h']
+    opt.w = config['w']
+    opt.gpu_ids = config['gpu_ids']
     opt.erasing_p = config['erasing_p']
+    opt.deberta = config['deberta']
     opt.lr = config['lr']
-    opt.nclasses = config['nclasses']
     opt.erasing_p = config['erasing_p']
-    opt.use_dense = config['use_dense']
-    opt.use_NAS = config['use_NAS']
-    opt.use_SE = config['use_SE']
-    opt.use_IR = config['use_IR']
     opt.PCB = config['PCB']
     opt.CPB = config['CPB']
     opt.fp16 = config['fp16']
     opt.balance = config['balance']
     opt.angle = config['angle']
     opt.arc = config['arc']
-
-    if opt.use_dense:
-        model = ft_net_dense(opt.nclasses, opt.droprate, opt.stride, None, opt.pool)
-    elif opt.use_NAS:
-        model = ft_net_NAS(opt.nclasses, opt.droprate, opt.stride)
-    elif opt.use_SE:
-        model = ft_net_SE(opt.nclasses, opt.droprate, opt.stride, opt.pool)
-    elif opt.use_DSE:
-        model = ft_net_DSE(opt.nclasses, opt.droprate, opt.stride, opt.pool)
-    elif opt.use_IR:
-        model = ft_net_IR(opt.nclasses, opt.droprate, opt.stride)
-    elif opt.use_EF4:
-        model = ft_net_EF4(opt.nclasses, opt.droprate)
-    elif opt.use_EF5:
-        model = ft_net_EF5(opt.nclasses, opt.droprate)
-    elif opt.use_EF6:
-        model = ft_net_EF6(opt.nclasses, opt.droprate)
-    else:
-        model = ft_net(opt.nclasses, opt.droprate, opt.stride, None, opt.pool)
-
-    if opt.PCB:
-        model = PCB(opt.nclasses)
-
-    if opt.CPB:
-        model = CPB(opt.nclasses)
-
-    if opt.angle:
-        model = ft_net_angle(opt.nclasses, opt.droprate, opt.stride)
-    elif opt.arc:
-        model = ft_net_arc(opt.nclasses, opt.droprate, opt.stride)
 
     # load model
     if isinstance(epoch, int):
@@ -150,7 +103,7 @@ def load_network(name, opt):
 
     save_path = os.path.join('./data/outputs',name,save_filename)
     print('Load the model from %s'%save_path)
-    network = model
+    network = SiameseBaselineModel(opt).cuda()
  
     try:
         network.load_state_dict(torch.load(save_path))

@@ -13,6 +13,8 @@ temp/
 temp_output/
 center/
 rainbow/
+crop/
+crops/
 
 # Compiled source #
 ###################
@@ -23,6 +25,9 @@ rainbow/
 *.o
 *.so
 *.pyc
+*.jpg
+*.jpeg
+*.png
 
 # Packages #
 ############
