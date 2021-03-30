@@ -34,18 +34,31 @@ class CityFlowNLDataset(Dataset):
         self.list_of_uuids = list(tracks.keys())
         self.list_of_tracks = list(tracks.values())
         self.list_of_crops = list()
+        train_num = len(self.list_of_uuids)
+        if data_cfg.semi:
+            #cv
+            with open(self.data_cfg.EVAL_TRACKS_JSON_PATH) as f:
+                unlabel_tracks = json.load(f)
+            f.close()
+            self.list_of_uuids.extend(unlabel_tracks.keys())
+            self.list_of_tracks.extend(unlabel_tracks.values())
+            #nl
+            with open("data/test-queries.json", "r") as f:
+                unlabel_nl = json.load(f)
+            unlabel_nl_key = list(unlabel_nl.keys())
         self.transform = transforms.Compose(
                        [transforms.ToTensor(),
                         transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))]) 
+
         print('#track id (class): %d '%len(self.list_of_tracks))
+        count = 0
         for track_idx, track in enumerate(self.list_of_tracks):
-            for frame_idx, frame in enumerate(track["frames"]):
-                frame_path = os.path.join(self.data_cfg.CITYFLOW_PATH, frame)
-                #nl_idx = int(random.uniform(0, 3))
-                nl = track["nl"]#[nl_idx]
-                box = track["boxes"][frame_idx]
-                crop = {"track_id": track_idx, "frame": frame_path, "nl": nl, "box": box}
-                self.list_of_crops.append(crop)
+            track["track_id"] = track_idx
+            # from 0 to train_num-1 is the id of the original training set. 
+            if track_idx>=train_num:
+                track["track_id"] = -1
+                track["nl"] = unlabel_nl[unlabel_nl_key[count]]
+                count = count+1
         self._logger = get_logger()
 
     def __len__(self):
@@ -55,11 +68,11 @@ class CityFlowNLDataset(Dataset):
         """
         Get pairs of NL and cropped frame.
         """
-        index = math.ceil(index/self.multi) 
-        if random.uniform(0, 1) > self.data_cfg.POSITIVE_THRESHOLD:
-            label = 1 #positive
-        else:
-            label = 0 #negative
+        index = math.floor(index/self.multi) 
+        #if random.uniform(0, 1) > self.data_cfg.POSITIVE_THRESHOLD:
+        label = 1 #positive
+        #else:
+        #    label = 0 #negative
         track = self.list_of_tracks[index]
         frame_idx = int(random.uniform(0, len((track["frames"]))))
         frame_path = os.path.join(self.data_cfg.CITYFLOW_PATH, track["frames"][frame_idx])
@@ -74,7 +87,7 @@ class CityFlowNLDataset(Dataset):
             w = frame.size[0]
             h = frame.size[1]
             pad = 5
-            crop_id =  index # dp["track_id"]
+            crop_id = track["track_id"]
             crop = frame.crop( ( max(0, box[0]-pad), max(0, box[1]-pad) ,
                min(box[0] + box[2]+pad, w-1), min(box[1] + box[3]+pad, h-1) ))
             frame.close() # clean
@@ -83,18 +96,17 @@ class CityFlowNLDataset(Dataset):
             crop = self.transform(crop)
             #crop = torch.from_numpy(crop).permute([2, 0, 1]).to(
             #    dtype=torch.float32)
-        nl_id = index #dp["track_id"]
+        nl_id = crop_id
         nl_idx = int(random.uniform(0, 3))
         nl = track["nl"][nl_idx]
-        if label != 1:
-            nsample = random.sample(self.list_of_crops, 1)
-            nl_idx = int(random.uniform(0, len(nsample[0]["nl"])))
-            nl = nsample[0]["nl"][nl_idx]
-            nl_id = nsample[0]["track_id"]
-            del nsample
+        #if label != 1:
+        #    nsample = random.sample(self.list_of_crops, 1)
+        #    nl_idx = int(random.uniform(0, len(nsample[0]["nl"])))
+        #    nl = nsample[0]["nl"][nl_idx]
+        #    nl_id = nsample[0]["track_id"]
+        #    del nsample
         nl = '[CLS]' + nl + '[SEP]'
         #label = torch.Tensor([label]).to(dtype=torch.float32) # only 0,1
-        #dp["token"] = self.bert_tokenizer.batch_encode_plus([dp["nl"]], padding='longest',return_tensors='pt')
         return nl, crop, nl_id, crop_id, label
 
 class CityFlowNLInferenceDataset(Dataset):

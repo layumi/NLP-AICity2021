@@ -111,12 +111,14 @@ def extract_feature_l(model,dataloaders):
                                                        return_tensors='pt')
         input_ids, attention_mask = tokens['input_ids'].cuda(), tokens['attention_mask'].cuda()
         lang_embeds = model.compute_lang_embed(input_ids, attention_mask = attention_mask)
-        ff = torch.sum(lang_embeds, dim =0)
 
-        #print(ff.shape)#512
+        fnorm = torch.norm(lang_embeds, p=2, dim=1, keepdim=True)
+        lang_embeds = lang_embeds.div(fnorm.expand_as(lang_embeds))
+
+        ff = torch.sum(lang_embeds, dim =0)
         fnorm = torch.norm(ff, p=2, dim=0, keepdim=True)
         ff = ff.div(fnorm.expand_as(ff))
-        features[query_id] = ff.cpu().numpy()
+        features[query_id] = torch.squeeze(ff).cpu().numpy()
     return features
 
 def extract_feature_v(model, dataloaders):
@@ -126,9 +128,9 @@ def extract_feature_v(model, dataloaders):
     for data, gallery_id in tqdm(dataloaders): # return one track
         data = data[0]
         n, c, h, w = data.size()
-        #print(data.size())
+        print(data.size(), gallery_id)
         for j in range(0, n, opt.batchsize):
-            img = data[j:min(j+opt.batchsize-1,n),:,:,:]
+            img = data[j:min(j+opt.batchsize,n),:,:,:]
             ff = torch.FloatTensor(1,512).zero_().cuda()
             for i in range(2):
                 if(i==1):
@@ -138,18 +140,20 @@ def extract_feature_v(model, dataloaders):
                     if scale != 1:
                         input_img = nn.functional.interpolate(input_img, scale_factor=scale, mode='bilinear', align_corners=False)
                     _, outputs = model.resnet50(input_img)
-                    ff = torch.sum(outputs, dim = 0)
-
+                    fnorm = torch.norm(outputs, p=2, dim=1, keepdim=True)
+                    outputs = outputs.div(fnorm.expand_as(outputs))
+                    ff += torch.sum(outputs, dim=0)
             if gallery_id in features:
                 features[gallery_id] +=ff
             else:
                 features[gallery_id] =ff
+        names.append(gallery_id)
     # Normalize
     for gallery_id in features:
         ff = features[gallery_id]
         fnorm = torch.norm(ff, p=2, dim=0, keepdim=True)
         ff = ff.div(fnorm.expand_as(ff))
-        features[gallery_id] = ff.cpu().numpy()
+        features[gallery_id] = torch.squeeze(ff).cpu().numpy()
     return features
 
 ######################################################################
@@ -190,47 +194,56 @@ snapshot_feature_mat = './feature/submit_result_%s'%opt.names
 print('Feature Output Path: %s'%snapshot_feature_mat)
 if not os.path.isfile(snapshot_feature_mat+'_gallery.pkl'):
     with torch.no_grad():
-        gallery_feature, query_feature = torch.FloatTensor(), torch.FloatTensor()
+        gallery_feature, query_feature  = {}, {}
         for model in models:
             q_f = extract_feature_l(model,dataloaders['query']) 
-            #qnorm = torch.norm(q_f, p=2, dim=1, keepdim=True)
-            #q_f = q_f.div(qnorm.expand_as(q_f)) / np.sqrt(len(names))
-
+            for q_id in q_f.keys():
+                if q_id in query_feature:
+                    query_feature[q_id] = np.concatenate((query_feature[q_id],q_f[q_id]), 0)
+                else:
+                    query_feature[q_id] = q_f[q_id]
             g_f = extract_feature_v(model,dataloaders['gallery']) 
-            #gnorm = torch.norm(g_f, p=2, dim=1, keepdim=True)
-            #g_f = g_f.div(gnorm.expand_as(g_f)) / np.sqrt(len(names))            
+            for g_id in g_f.keys():
+                if g_id in gallery_feature:
+                    gallery_feature[g_id] = np.concatenate((gallery_feature[g_id],g_f[g_id]), 0)
+                else:
+                    gallery_feature[g_id] = g_f[g_id]
 
-            #gallery_feature = torch.cat((gallery_feature,g_f), 1)
-            #query_feature = torch.cat((query_feature,q_f), 1)
-
-    save_pkl(snapshot_feature_mat+'_gallery.pkl', g_f)
-    save_pkl(snapshot_feature_mat+'_query.pkl', q_f)
+    save_pkl(snapshot_feature_mat+'_gallery.pkl', gallery_feature)
+    save_pkl(snapshot_feature_mat+'_query.pkl', query_feature)
 else:
     print('load feature from disk.')
-    q_f = load_pkl(snapshot_feature_mat+'_query.pkl')
-    g_f = load_pkl(snapshot_feature_mat+'_gallery.pkl')
+    query_feature = load_pkl(snapshot_feature_mat+'_query.pkl')
+    gallery_feature = load_pkl(snapshot_feature_mat+'_gallery.pkl')
 
 gf_name = []
-gf_tensor = np.ndarray( (len(g_f),512)) 
+gf_tensor = np.ndarray( (len(gallery_feature),512*len(models))) 
 count = 0
-for k,v in g_f.items():
+for k,v in gallery_feature.items():
     gf_tensor[count,:] = v
     gf_name.append(k)
+    count +=1
 
-gf_tensor = torch.FloatTensor(gf_tensor).cuda()
+#print(gf_tensor)
+gf_tensor = torch.FloatTensor(gf_tensor).cuda() # 530, 512
+fnorm = torch.norm(gf_tensor, p=2, dim=1, keepdim=True) # 530
+#print(fnorm)
+gf_tensor = gf_tensor.div(fnorm.expand_as(gf_tensor))
+
 result = {}
-for qk in q_f: 
-    qv = torch.FloatTensor(q_f[qk]).cuda()
-    score = torch.mm(gf_tensor,qv.unsqueeze(1))
+for qk in query_feature.keys(): 
+    qv = torch.FloatTensor(query_feature[qk]).view(-1,1).cuda()
+    score = torch.mm(gf_tensor,qv)
     score = score.squeeze(1).cpu()
     score = score.numpy()
-    print(gf_tensor)
+    #print(gf_tensor)
+    #print(qv)
+    print(max(score))
     # predict index
     index = np.argsort(score)  #from small to large
     index = index[::-1]
     result[qk] = []
     for i in index:
-        result[qk].append(gf_name[i])
-
+        result[qk].append(gf_name[i][0])
 with open("results.json", "w") as f:
-        json.dump(result, f)
+        json.dump(result, f, indent=4)

@@ -12,6 +12,8 @@ from torchvision import datasets, transforms
 import torch.backends.cudnn as cudnn
 import torch.nn.functional as F
 import matplotlib
+import math
+from sam import SAM
 matplotlib.use('agg')
 import matplotlib.pyplot as plt
 #from PIL import Image
@@ -24,6 +26,7 @@ from vehicle_retrieval_dataset import CityFlowNLInferenceDataset
 import yaml
 from shutil import copyfile
 import random
+import numpy as np
 from DeBERTa import deberta
 from transformers import AutoTokenizer
 from utils import get_model_list, load_network, save_network, make_weights_for_balanced_classes
@@ -70,13 +73,16 @@ parser.add_argument('--droprate', default=0.5, type=float, help='drop rate')
 parser.add_argument('--PCB', action='store_true', help='use PCB+ResNet50' )
 parser.add_argument('--CPB', action='store_true', help='use Center+ResNet50' )
 parser.add_argument('--fp16', action='store_true', help='use float16 instead of float32, which will save about 50% memory' )
+parser.add_argument("--sam", action='store_true', help="enable sam.")
 parser.add_argument('--balance', action='store_true', help='balance sample' )
 parser.add_argument('--angle', action='store_true', help='use angle loss' )
 parser.add_argument('--arc', action='store_true', help='use arc loss' )
 parser.add_argument('--circle', action='store_true', help='use Circle loss' )
 parser.add_argument('--noisy', action='store_true', help='use model trained with noisy student' )
-parser.add_argument('--warm_epoch', default=0, type=int, help='the first K epoch that needs warm up')
+parser.add_argument('--warm_epoch', default=10, type=int, help='the first K epoch that needs warm up')
+parser.add_argument('--num_epoch', default=80, type=int, help='the first K epoch that needs warm up')
 parser.add_argument('--resume', action='store_true', help='use arc loss' )
+parser.add_argument('--semi', action='store_true', help='transductive learning' )
 opt = parser.parse_args()
 
 if opt.resume:
@@ -111,7 +117,7 @@ if len(opt.gpu_ids)>0:
 dataset = CityFlowNLDataset(opt)
 dataset_size = len(dataset)
 dataloader = torch.utils.data.DataLoader(dataset, batch_size=opt.batchsize,
-                            num_workers=4, pin_memory=True, drop_last=True)
+                            shuffle=True, num_workers=4, pin_memory=True, drop_last=True)
 
 use_gpu = torch.cuda.is_available()
 
@@ -139,16 +145,27 @@ y_err = {}
 y_err['train'] = []
 y_err['val'] = []
 
-def compute_loss(model, input_ids, attention_mask, crop, nl_id, crop_id, label):
-    similarity, predict_class_v, predict_class_l = model.forward(input_ids, attention_mask, crop)
+def l2_norm(v):
+    fnorm = torch.norm(v, p=2, dim=1, keepdim=True) + 1e-6
+    v = v.div(fnorm.expand_as(v))
+    return v
+
+def compute_loss(model, input_ids, attention_mask, crop, nl_id, crop_id, label, warm):
+    visual_embeds, lang_embeds, predict_class_v, predict_class_l = model.forward(input_ids, attention_mask, crop)
     #print(similarity.shape, predict_class_v.shape, predict_class_l.shape)
     #print(label.shape, nl_id.shape)
     label = label.float()
-    loss_con = F.binary_cross_entropy(similarity, label.cuda())/opt.batchsize
-    loss_cv =  F.cross_entropy(predict_class_v, crop_id.cuda())
-    loss_nl =  F.cross_entropy(predict_class_l, nl_id.cuda())
-    loss_total = loss_con + loss_cv + loss_nl
-    print('\r\rtotal: %.4f  loss_con:%.4f loss_cv: %.4f loss_nl:%.4f'%(loss_total, loss_con, loss_cv, loss_nl), end="" )
+    
+    sim1 = torch.mm(l2_norm(visual_embeds), torch.t(l2_norm(lang_embeds))) 
+    sim2 = sim1.t()
+    sim_label = torch.arange(crop.size(0)).cuda()
+    sim_label[np.argwhere(label==-1)] = -1 
+    loss_con = F.cross_entropy(sim1, sim_label) + F.cross_entropy(sim2, sim_label)
+    loss_cv =  F.cross_entropy(predict_class_v, crop_id.cuda(), ignore_index = -1)
+    #print(nl_id)
+    loss_nl =  F.cross_entropy(predict_class_l, nl_id.cuda(), ignore_index = -1)
+    loss_total = loss_con/2 + loss_cv + loss_nl
+    print('\r\rtotal: %.4f  loss_con:%.4f loss_cv: %.4f loss_nl:%.4f warmup:%.4f'%(loss_total, loss_con, loss_cv, loss_nl, warm), end="" )
     return loss_total
 
 
@@ -158,7 +175,8 @@ def train_model(model, criterion, optimizer, scheduler, start_epoch=0, num_epoch
 
     warm_up = 0.1 # We start from the 0.1*lrRate
     gamma = 0.0 #auto_aug
-    warm_iteration = round(dataset_size/opt.batchsize)*opt.warm_epoch # first 5 epoch
+    warm_iteration = round(dataset_size/opt.batchsize)*opt.warm_epoch*2 # first 5 epoch
+    print(warm_iteration)
     total_iteration = round(dataset_size/opt.batchsize)*num_epochs
 
     best_model_wts = model.state_dict()
@@ -192,7 +210,7 @@ def train_model(model, criterion, optimizer, scheduler, start_epoch=0, num_epoch
                                                        return_tensors='pt')
 
                     optimizer.zero_grad()
-                    loss = compute_loss(model, tokens['input_ids'].cuda(), tokens['attention_mask'].cuda(), crop.cuda(), nl_id, crop_id, label)
+                    loss = compute_loss(model, tokens['input_ids'].cuda(), tokens['attention_mask'].cuda(), crop.cuda(), nl_id, crop_id, label, warm_up)
                 # backward + optimize only if in training phase
                     if epoch<opt.warm_epoch and phase == 'train': 
                         warm_up = min(1.0, warm_up + 0.9 / warm_iteration)
@@ -204,7 +222,13 @@ def train_model(model, criterion, optimizer, scheduler, start_epoch=0, num_epoch
                                 scaled_loss.backward()
                         else:
                             loss.backward()
-                        optimizer.step()
+
+                        if opt.sam:
+                            optimizer.first_step(zero_grad=True)
+                            loss.backward()
+                            optimizer.second_step(zero_grad=True)
+                        else:
+                            optimizer.step()
 
                 # statistics
                     if int(version[0])>0 or int(version[2]) > 3: # for the new version like 0.4.0, 0.5.0 and 1.0.0
@@ -302,10 +326,19 @@ model = torch.nn.DataParallel(model, device_ids=opt.gpu_ids).cuda()
 #model.bert_model = torch.nn.DataParallel(model.bert_model, device_ids=opt.gpu_ids).cuda()
 #model.lang_fc = torch.nn.DataParallel(model.lang_fc, device_ids=opt.gpu_ids).cuda()
 
-ignored_params = list(map(id, model.module.lang_fc.parameters() )) + list(map(id, model.module.resnet50.classifier.parameters() ))
+ignored_params = list(map(id, model.module.lang_fc.parameters() )) + list(map(id, model.module.resnet50.classifier.parameters() ))\
+                     + list(map(id, model.module.bert_model.parameters() ))
 base_params = filter(lambda p: id(p) not in ignored_params, model.parameters())
-optimizer = torch.optim.SGD([
+
+if opt.sam:
+    optim_method = SAM
+else:
+    optim_method = optim.SGD
+
+
+optimizer = optim_method([
              {'params': base_params, 'lr': 0.1*opt.lr,},
+             {'params': model.module.bert_model.parameters(), 'lr': 0.1*opt.lr,},
              {'params': model.module.lang_fc.parameters(), 'lr': opt.lr,},
              {'params': model.module.resnet50.classifier.parameters(), 'lr': opt.lr,}
          ], weight_decay=5e-4, momentum=0.9, nesterov=True)
@@ -314,7 +347,7 @@ if opt.adam:
 
 # Decay LR by a factor of 0.1 every 40 epochs
 #exp_lr_scheduler = lr_scheduler.StepLR(optimizer_ft, step_size=40, gamma=0.1)
-exp_lr_scheduler = lr_scheduler.MultiStepLR(optimizer, milestones=[60-start_epoch, 75-start_epoch], gamma=0.1)
+exp_lr_scheduler = lr_scheduler.MultiStepLR(optimizer, milestones=[round(0.75*opt.num_epoch-start_epoch), round(0.9*opt.num_epoch)-start_epoch], gamma=0.1)
 
 ######################################################################
 # Train and evaluate
@@ -350,5 +383,5 @@ else:
 
 print(model)
 model = train_model(model, criterion, optimizer, exp_lr_scheduler,
-                    start_epoch=start_epoch, num_epochs=80)
+                    start_epoch=start_epoch, num_epochs=opt.num_epoch)
 

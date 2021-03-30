@@ -33,9 +33,9 @@ class SiameseBaselineModel(torch.nn.Module):
         predict_class_v, visual_embeds = self.resnet50(crops) # 3028, 512
         #print(visual_embeds.shape)
         #print(lang_embeds.shape)
-        d = F.pairwise_distance(visual_embeds, lang_embeds)
-        similarity = torch.exp(-d)
-        return similarity, predict_class_v, predict_class_l
+        #d = F.pairwise_distance(visual_embeds, lang_embeds)
+        #similarity = torch.exp(-d)
+        return visual_embeds, lang_embeds, predict_class_v, predict_class_l
 
     def compute_lang_embed(self, input_ids, attention_mask):
         with torch.no_grad():
