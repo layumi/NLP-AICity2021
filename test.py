@@ -105,7 +105,7 @@ def extract_feature_l(model,dataloaders):
         ff = torch.FloatTensor(1,512).zero_().cuda()
         nl = []
         for i in range(len(nl3)):
-            nl.append( '[CLS]' + nl3[i] + '[SEP]')
+            nl.append( '[CLS]' + nl3[i].replace('Sedan', 'sedan').replace('suv','SUV').replace('Suv','SUV').replace('Jeep','jeep').replace('  ',' ') + '[SEP]')
         
         tokens = bert_tokenizer.batch_encode_plus(nl, padding='longest',
                                                        return_tensors='pt')

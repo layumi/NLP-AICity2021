@@ -29,6 +29,7 @@ import random
 import numpy as np
 from DeBERTa import deberta
 from transformers import AutoTokenizer
+import utils_T2
 from utils import get_model_list, load_network, save_network, make_weights_for_balanced_classes
 from circle_loss import CircleLoss, convert_label_to_similarity
 
@@ -77,6 +78,7 @@ parser.add_argument("--sam", action='store_true', help="enable sam.")
 parser.add_argument('--balance', action='store_true', help='balance sample' )
 parser.add_argument('--angle', action='store_true', help='use angle loss' )
 parser.add_argument('--arc', action='store_true', help='use arc loss' )
+parser.add_argument('--track2', action='store_true', help='use arc loss' )
 parser.add_argument('--circle', action='store_true', help='use Circle loss' )
 parser.add_argument('--noisy', action='store_true', help='use model trained with noisy student' )
 parser.add_argument('--warm_epoch', default=10, type=int, help='the first K epoch that needs warm up')
@@ -296,6 +298,11 @@ def draw_curve(current_epoch):
 #
 # Load a pretrainied model and reset final fully connected layer.
 #
+opt.init_model = None
+
+if opt.track2: 
+    old_opt = parser.parse_args()
+    opt.init_model, old_opt, _ = utils_T2.load_network('ft_2021SE_imbalance_s1_384_p0.5_lr1_mt_d0.2_b36_wa_sam_gem', old_opt )
 
 model = SiameseBaselineModel(opt).cuda()
 
@@ -322,9 +329,6 @@ if start_epoch>=75:
     opt.lr = opt.lr*0.1
 
 model = torch.nn.DataParallel(model, device_ids=opt.gpu_ids).cuda()
-#model.resnet50 = torch.nn.DataParallel(model.resnet50, device_ids=opt.gpu_ids).cuda()
-#model.bert_model = torch.nn.DataParallel(model.bert_model, device_ids=opt.gpu_ids).cuda()
-#model.lang_fc = torch.nn.DataParallel(model.lang_fc, device_ids=opt.gpu_ids).cuda()
 
 ignored_params = list(map(id, model.module.lang_fc.parameters() )) + list(map(id, model.module.resnet50.classifier.parameters() ))\
                      + list(map(id, model.module.bert_model.parameters() ))

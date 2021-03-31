@@ -13,7 +13,7 @@ class SiameseBaselineModel(torch.nn.Module):
     def __init__(self, model_cfg):
         super().__init__()
         self.model_cfg = model_cfg
-        self.resnet50 = ft_net_SE( class_num = 2498, droprate=0.2, stride=1, pool='gem', circle =True)
+        self.resnet50 = ft_net_SE( class_num = 2498, droprate=0.2, stride=1, pool='gem', circle =True, init_model = model_cfg.init_model)
         #self.resnet50 = ft_net( class_num = 2498, droprate=0.2, stride=1, pool='avg+max',circle =True)
         #self.bert_tokenizer = AutoTokenizer.from_pretrained("roberta-base")
         self.bert_model = AutoModel.from_pretrained("roberta-base")

@@ -92,7 +92,7 @@ class CityFlowNLDataset(Dataset):
                min(box[0] + box[2]+pad, w-1), min(box[1] + box[3]+pad, h-1) ))
             frame.close() # clean
             crop = crop.resize((self.data_cfg.CROP_SIZE, self.data_cfg.CROP_SIZE) , Image.BICUBIC)
-            crop = self.aug(crop)
+            #crop = self.aug(crop)
             crop = self.transform(crop)
             #crop = torch.from_numpy(crop).permute([2, 0, 1]).to(
             #    dtype=torch.float32)
@@ -105,7 +105,7 @@ class CityFlowNLDataset(Dataset):
         #    nl = nsample[0]["nl"][nl_idx]
         #    nl_id = nsample[0]["track_id"]
         #    del nsample
-        nl = '[CLS]' + nl + '[SEP]'
+        nl = '[CLS]' + nl.replace('Sedan', 'sedan').replace('suv','SUV').replace('Suv','SUV').replace('Jeep','jeep').replace('  ',' ') + '[SEP]'
         #label = torch.Tensor([label]).to(dtype=torch.float32) # only 0,1
         return nl, crop, nl_id, crop_id, label
 
