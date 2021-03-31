@@ -17,13 +17,17 @@ class SiameseBaselineModel(torch.nn.Module):
         #self.resnet50 = ft_net( class_num = 2498, droprate=0.2, stride=1, pool='avg+max',circle =True)
         #self.bert_tokenizer = AutoTokenizer.from_pretrained("roberta-base")
         self.bert_model = AutoModel.from_pretrained("roberta-base")
-        self.logit_scale = torch.nn.Parameter(torch.ones(()), requires_grad=True)
+        self.logit_scale1 = torch.nn.Parameter(torch.ones(()), requires_grad=True)
+        self.logit_scale2 = torch.nn.Parameter(torch.ones(()), requires_grad=True)
         #self.lang_fc = torch.nn.Linear(768, 1024)
         self.lang_fc = torch.nn.Linear(768, 4096)
+        self.motion = model_cfg.motion
+        if model_cfg.motion:
+            self.resnet50_m = ft_net_SE( class_num = 2498, droprate=0.2, stride=1, pool='gem', circle =True, init_model = None)
         if model_cfg.deberta:
             self.bert_model = deberta.DeBERTa(pre_trained='base') 
             self.bert_model.apply_state()
-    def forward(self, input_ids, attention_mask, crops):
+    def forward(self, input_ids, attention_mask, crops, motion=None):
         if self.model_cfg.deberta:
             outputs = self.bert_model(input_ids)[-1]
         else:
@@ -32,6 +36,9 @@ class SiameseBaselineModel(torch.nn.Module):
         lang_embeds = self.lang_fc(lang_embeds) # 2048
         predict_class_l, lang_embeds = self.resnet50.classifier(lang_embeds) # 3028, 512
         predict_class_v, visual_embeds = self.resnet50(crops) # 3028, 512
+        if self.motion:
+            _, motion_embeds = self.resnet50_m(crops) # 3028, 512
+            return visual_embeds, lang_embeds, motion_embeds, predict_class_v, predict_class_l
         #print(visual_embeds.shape)
         #print(lang_embeds.shape)
         #d = F.pairwise_distance(visual_embeds, lang_embeds)

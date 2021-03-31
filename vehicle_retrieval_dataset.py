@@ -10,6 +10,7 @@ import copy
 from PIL import Image
 import torch
 import math
+from random_erasing import RandomErasing
 import numpy as np
 import multiprocessing
 from multiprocessing import Pool
@@ -17,7 +18,7 @@ import torchvision.transforms as transforms
 from torch.utils.data import Dataset
 from auto_augment import AutoAugment, auto_augment_policy 
 from utils import get_logger
-
+from tqdm import tqdm
 
 class CityFlowNLDataset(Dataset):
     def __init__(self, data_cfg, multi=10):
@@ -26,6 +27,7 @@ class CityFlowNLDataset(Dataset):
         :param data_cfg: CfgNode for CityFlow NL.
         """
         self.multi = multi
+        self.motion = data_cfg.motion
         self.data_cfg = data_cfg
         self.aug = AutoAugment(auto_augment_policy(name='v0r', hparams=None))
         with open(self.data_cfg.JSON_PATH) as f:
@@ -35,6 +37,11 @@ class CityFlowNLDataset(Dataset):
         self.list_of_tracks = list(tracks.values())
         self.list_of_crops = list()
         train_num = len(self.list_of_uuids)
+        self.transform = transforms.Compose(
+                       [transforms.ToTensor(),
+                        transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5)),
+                        RandomErasing(probability=0.5) ])
+
         if data_cfg.semi:
             #cv
             with open(self.data_cfg.EVAL_TRACKS_JSON_PATH) as f:
@@ -46,12 +53,10 @@ class CityFlowNLDataset(Dataset):
             with open("data/test-queries.json", "r") as f:
                 unlabel_nl = json.load(f)
             unlabel_nl_key = list(unlabel_nl.keys())
-        self.transform = transforms.Compose(
-                       [transforms.ToTensor(),
-                        transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))]) 
 
         print('#track id (class): %d '%len(self.list_of_tracks))
         count = 0
+        # add id and nl, -1 for unlabeled data
         for track_idx, track in enumerate(self.list_of_tracks):
             track["track_id"] = track_idx
             # from 0 to train_num-1 is the id of the original training set. 
@@ -74,6 +79,11 @@ class CityFlowNLDataset(Dataset):
         #else:
         #    label = 0 #negative
         track = self.list_of_tracks[index]
+        if self.motion:
+            motion = Image.open('motions/%04d.jpg'%index).convert('RGB')
+            motion = motion.resize((self.data_cfg.CROP_SIZE, self.data_cfg.CROP_SIZE) , Image.BICUBIC)
+            #motion = self.aug(motion)
+            motion = self.transform(motion)
         frame_idx = int(random.uniform(0, len((track["frames"]))))
         frame_path = os.path.join(self.data_cfg.CITYFLOW_PATH, track["frames"][frame_idx])
         if not os.path.isfile(frame_path):
@@ -99,14 +109,10 @@ class CityFlowNLDataset(Dataset):
         nl_id = crop_id
         nl_idx = int(random.uniform(0, 3))
         nl = track["nl"][nl_idx]
-        #if label != 1:
-        #    nsample = random.sample(self.list_of_crops, 1)
-        #    nl_idx = int(random.uniform(0, len(nsample[0]["nl"])))
-        #    nl = nsample[0]["nl"][nl_idx]
-        #    nl_id = nsample[0]["track_id"]
-        #    del nsample
         nl = '[CLS]' + nl.replace('Sedan', 'sedan').replace('suv','SUV').replace('Suv','SUV').replace('Jeep','jeep').replace('  ',' ') + '[SEP]'
         #label = torch.Tensor([label]).to(dtype=torch.float32) # only 0,1
+        if self.motion:
+            return nl, crop, motion, nl_id, crop_id, label
         return nl, crop, nl_id, crop_id, label
 
 class CityFlowNLInferenceDataset(Dataset):
@@ -171,4 +177,9 @@ class CityFlowNLInferenceDataset(Dataset):
             with Pool(4) as p:
                 p.map(self.read_img, zip(frame_idx_iter, frame_path_iter, frame_box_iter) )
         crops = self.cropped_frames
+        if self.motion:
+            motion = Image.open('motions/%04d.jpg'%(2498+index)).convert('RGB')
+            motion = motion.resize((self.data_cfg.CROP_SIZE, self.data_cfg.CROP_SIZE) , Image.BICUBIC)
+            motion = self.transform(motion)
+
         return crops, self.list_of_uuids[index]

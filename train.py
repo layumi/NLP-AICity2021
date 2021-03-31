@@ -80,6 +80,7 @@ parser.add_argument('--angle', action='store_true', help='use angle loss' )
 parser.add_argument('--arc', action='store_true', help='use arc loss' )
 parser.add_argument('--track2', action='store_true', help='use arc loss' )
 parser.add_argument('--circle', action='store_true', help='use Circle loss' )
+parser.add_argument('--motion', action='store_true', help='use motion' )
 parser.add_argument('--noisy', action='store_true', help='use model trained with noisy student' )
 parser.add_argument('--warm_epoch', default=10, type=int, help='the first K epoch that needs warm up')
 parser.add_argument('--num_epoch', default=80, type=int, help='the first K epoch that needs warm up')
@@ -152,22 +153,32 @@ def l2_norm(v):
     v = v.div(fnorm.expand_as(v))
     return v
 
-def compute_loss(model, input_ids, attention_mask, crop, nl_id, crop_id, label, warm):
-    visual_embeds, lang_embeds, predict_class_v, predict_class_l = model.forward(input_ids, attention_mask, crop)
+def compute_loss(model, input_ids, attention_mask, crop, motion, nl_id, crop_id, label, warm):
+    if opt.motion:
+        visual_embeds, lang_embeds, motion_embeds, predict_class_v, predict_class_l = model.forward(input_ids, attention_mask, crop, motion)
+    else:
+        visual_embeds, lang_embeds, predict_class_v, predict_class_l = model.forward(input_ids, attention_mask, crop)
     #print(similarity.shape, predict_class_v.shape, predict_class_l.shape)
     #print(label.shape, nl_id.shape)
     #label = label.float()
     
-    sim1 = torch.mm(l2_norm(visual_embeds)*torch.exp(model.module.logit_scale), torch.t(l2_norm(lang_embeds))) 
+    sim1 = torch.mm(l2_norm(visual_embeds)*torch.exp(model.module.logit_scale1), torch.t(l2_norm(lang_embeds))) 
     sim2 = sim1.t()
     sim_label = torch.arange(crop.size(0)).cuda().detach()
     sim_label[np.argwhere(crop_id==-1)] = -1 
     loss_con = F.cross_entropy(sim1, sim_label, ignore_index = -1) + F.cross_entropy(sim2, sim_label, ignore_index = -1)
+
+    if opt.motion:
+        sim3 = torch.mm(l2_norm(motion_embeds)*torch.exp(model.module.logit_scale2), torch.t(l2_norm(lang_embeds)))
+        sim4 = sim3.t()
+        loss_con2 = F.cross_entropy(sim3, sim_label, ignore_index = -1) + F.cross_entropy(sim4, sim_label, ignore_index = -1)
+        loss_con = 0.5*loss_con + 0.5*loss_con2
+
     loss_cv =  F.cross_entropy(predict_class_v, crop_id.cuda(), ignore_index = -1)
     #print(nl_id)
     loss_nl =  F.cross_entropy(predict_class_l, nl_id.cuda(), ignore_index = -1)
     loss_total = loss_con/2 + loss_cv + loss_nl
-    print('\r\rtotal: %.4f  loss_con:%.4f loss_cv: %.4f loss_nl:%.4f warmup:%.4f'%(loss_total, loss_con, loss_cv, loss_nl, warm), end="" )
+    print('\r\rtotal:%.4f  loss_con:%.4f loss_cv:%.4f loss_nl:%.4f warmup:%.4f'%(loss_total, loss_con, loss_cv, loss_nl, warm), end="" )
     return loss_total
 
 
@@ -207,12 +218,16 @@ def train_model(model, criterion, optimizer, scheduler, start_epoch=0, num_epoch
             with tqdm(dataloader, ascii=True) as tq:
                 for data in tq:
                 # zero the parameter gradients
-                    nl, crop, nl_id, crop_id, label = data
+                    if opt.motion:
+                        nl, crop, motion, nl_id, crop_id, label = data
+                    else:
+                        nl, crop, nl_id, crop_id, label = data
+                        motion = None
                     tokens = bert_tokenizer.batch_encode_plus(nl, padding='longest',
                                                        return_tensors='pt')
 
                     optimizer.zero_grad()
-                    loss = compute_loss(model, tokens['input_ids'].cuda(), tokens['attention_mask'].cuda(), crop.cuda(), nl_id, crop_id, label, warm_up)
+                    loss = compute_loss(model, tokens['input_ids'].cuda(), tokens['attention_mask'].cuda(), crop.cuda(), motion.cuda(), nl_id, crop_id, label, warm_up)
                 # backward + optimize only if in training phase
                     if epoch<opt.warm_epoch and phase == 'train': 
                         warm_up = min(1.0, warm_up + 0.9 / warm_iteration)
