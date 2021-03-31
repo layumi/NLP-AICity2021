@@ -298,26 +298,13 @@ def draw_curve(current_epoch):
 #
 # Load a pretrainied model and reset final fully connected layer.
 #
-opt.init_model = None
+init_model = None
 
 if opt.track2: 
     old_opt = parser.parse_args()
-    opt.init_model, old_opt, _ = utils_T2.load_network('ft_2021SE_imbalance_s1_384_p0.5_lr1_mt_d0.2_b36_wa_sam_gem', old_opt )
+    init_model, old_opt, _ = utils_T2.load_network('ft_2021SE_imbalance_s1_384_p0.5_lr1_mt_d0.2_b36_wa_sam_gem', old_opt )
 
-model = SiameseBaselineModel(opt).cuda()
-
-if opt.init_name != 'imagenet':
-    old_opt = parser.parse_args()
-    init_model, old_opt, _ = load_network(opt.init_name, old_opt)
-    print(old_opt)
-    opt.stride = old_opt.stride
-    opt.pool = old_opt.pool
-    opt.use_dense = old_opt.use_dense
-    if opt.use_dense:
-        model = ft_net_dense(opt.nclasses, droprate=opt.droprate, stride=opt.stride, init_model=init_model, pool = opt.pool, circle = opt.circle)
-    else:
-        model = ft_net(opt.nclasses, droprate=opt.droprate, stride=opt.stride, init_model=init_model, pool = opt.pool, circle = opt.circle)
-
+model = SiameseBaselineModel(opt, init_model).cuda()
 
 ##########################
 #Put model parameter in front of the optimizer!!!
