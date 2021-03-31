@@ -156,9 +156,9 @@ def compute_loss(model, input_ids, attention_mask, crop, nl_id, crop_id, label, 
     #print(label.shape, nl_id.shape)
     label = label.float()
     
-    sim1 = torch.mm(l2_norm(visual_embeds), torch.t(l2_norm(lang_embeds))) 
+    sim1 = torch.mm(l2_norm(visual_embeds)*torch.exp(model.module.logit_scale), torch.t(l2_norm(lang_embeds))) 
     sim2 = sim1.t()
-    sim_label = torch.arange(crop.size(0)).cuda()
+    sim_label = torch.arange(crop.size(0)).cuda().detach()
     sim_label[np.argwhere(label==-1)] = -1 
     loss_con = F.cross_entropy(sim1, sim_label) + F.cross_entropy(sim2, sim_label)
     loss_cv =  F.cross_entropy(predict_class_v, crop_id.cuda(), ignore_index = -1)
