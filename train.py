@@ -264,7 +264,7 @@ def train_model(model, criterion, optimizer, scheduler, start_epoch=0, num_epoch
             #if len(opt.gpu_ids)>1:
             #    save_network(model.module, opt.name, epoch+1)
             #else:
-            if epoch %5 ==0:
+            if epoch %10 ==0:
                 save_network(model, opt.name, epoch+1)
             draw_curve(epoch)
 
