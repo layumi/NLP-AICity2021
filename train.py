@@ -81,6 +81,7 @@ parser.add_argument('--arc', action='store_true', help='use arc loss' )
 parser.add_argument('--track2', action='store_true', help='use arc loss' )
 parser.add_argument('--circle', action='store_true', help='use Circle loss' )
 parser.add_argument('--motion', action='store_true', help='use motion' )
+parser.add_argument('--ddloss', action='store_true', help='use ddloss' )
 parser.add_argument('--noisy', action='store_true', help='use model trained with noisy student' )
 parser.add_argument('--warm_epoch', default=10, type=int, help='the first K epoch that needs warm up')
 parser.add_argument('--num_epoch', default=80, type=int, help='the first K epoch that needs warm up')
@@ -155,16 +156,21 @@ def l2_norm(v):
 
 def compute_loss(model, input_ids, attention_mask, crop, motion, nl_id, crop_id, label, warm):
     if opt.motion:
-        visual_embeds, lang_embeds, motion_embeds, predict_class_v, predict_class_l = model.forward(input_ids, attention_mask, crop, motion)
+        visual_embeds, lang_embeds, motion_embeds, predict_class_v, predict_class_l = model.forward(input_ids, attention_mask, crop, motion.cuda())
     else:
         visual_embeds, lang_embeds, predict_class_v, predict_class_l = model.forward(input_ids, attention_mask, crop)
     #print(similarity.shape, predict_class_v.shape, predict_class_l.shape)
     #print(label.shape, nl_id.shape)
     #label = label.float()
+    if opt.ddloss:
+        visual_embeds = visual_embeds.t()
+        lang_embeds =lang_embeds.t()
+        if opt.motion:
+            motion_embeds = motion_embeds.t()
     
     sim1 = torch.mm(l2_norm(visual_embeds)*torch.exp(model.module.logit_scale1), torch.t(l2_norm(lang_embeds))) 
     sim2 = sim1.t()
-    sim_label = torch.arange(crop.size(0)).cuda().detach()
+    sim_label = torch.arange(sim1.size(0)).cuda().detach()
     sim_label[np.argwhere(nl_id==-1)] = -1 
     loss_con = F.cross_entropy(sim1, sim_label, ignore_index = -1) + F.cross_entropy(sim2, sim_label, ignore_index = -1)
 
@@ -227,7 +233,7 @@ def train_model(model, criterion, optimizer, scheduler, start_epoch=0, num_epoch
                                                        return_tensors='pt')
 
                     optimizer.zero_grad()
-                    loss = compute_loss(model, tokens['input_ids'].cuda(), tokens['attention_mask'].cuda(), crop.cuda(), motion.cuda(), nl_id, crop_id, label, warm_up)
+                    loss = compute_loss(model, tokens['input_ids'].cuda(), tokens['attention_mask'].cuda(), crop.cuda(), motion, nl_id, crop_id, label, warm_up)
                 # backward + optimize only if in training phase
                     if epoch<opt.warm_epoch and phase == 'train': 
                         warm_up = min(1.0, warm_up + 0.9 / warm_iteration)
