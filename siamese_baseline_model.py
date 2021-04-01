@@ -10,7 +10,7 @@ from transformers import AutoTokenizer, AutoModel
 from DeBERTa import deberta
 
 class SiameseBaselineModel(torch.nn.Module):
-    def __init__(self, model_cfg, init_model):
+    def __init__(self, model_cfg, init_model=None):
         super().__init__()
         self.model_cfg = model_cfg
         self.resnet50 = ft_net_SE( class_num = 2498, droprate=0.2, stride=1, pool='gem', circle =True, init_model = init_model)
@@ -23,7 +23,7 @@ class SiameseBaselineModel(torch.nn.Module):
         self.lang_fc = torch.nn.Linear(768, 4096)
         self.motion = model_cfg.motion
         if model_cfg.motion:
-            self.resnet50_m = ft_net_SE( class_num = 2498, droprate=0.2, stride=1, pool='gem', circle =True, init_model = None)
+            self.resnet50_m = ft_net( class_num = 2498, droprate=0.2, stride=1, pool='gem', circle =True, init_model = None)
         if model_cfg.deberta:
             self.bert_model = deberta.DeBERTa(pre_trained='base') 
             self.bert_model.apply_state()

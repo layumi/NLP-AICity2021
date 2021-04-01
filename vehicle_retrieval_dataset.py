@@ -59,9 +59,10 @@ class CityFlowNLDataset(Dataset):
         # add id and nl, -1 for unlabeled data
         for track_idx, track in enumerate(self.list_of_tracks):
             track["track_id"] = track_idx
+            track["nl_id"] = track_idx
             # from 0 to train_num-1 is the id of the original training set. 
             if track_idx>=train_num:
-                track["track_id"] = -1
+                track["nl_id"] = -1
                 track["nl"] = unlabel_nl[unlabel_nl_key[count]]
                 count = count+1
         self._logger = get_logger()
@@ -106,7 +107,7 @@ class CityFlowNLDataset(Dataset):
             crop = self.transform(crop)
             #crop = torch.from_numpy(crop).permute([2, 0, 1]).to(
             #    dtype=torch.float32)
-        nl_id = crop_id
+        nl_id = track["nl_id"]
         nl_idx = int(random.uniform(0, 3))
         nl = track["nl"][nl_idx]
         nl = '[CLS]' + nl.replace('Sedan', 'sedan').replace('suv','SUV').replace('Suv','SUV').replace('Jeep','jeep').replace('  ',' ') + '[SEP]'
@@ -124,6 +125,7 @@ class CityFlowNLInferenceDataset(Dataset):
         self.list_of_uuids = list(tracks.keys())
         self.list_of_tracks = list(tracks.values())
         self._logger = get_logger()
+        self.motion = data_cfg.motion
         self.transform = transforms.Compose(
                        [transforms.ToTensor(),
                         transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))])
@@ -181,5 +183,5 @@ class CityFlowNLInferenceDataset(Dataset):
             motion = Image.open('motions/%04d.jpg'%(2498+index)).convert('RGB')
             motion = motion.resize((self.data_cfg.CROP_SIZE, self.data_cfg.CROP_SIZE) , Image.BICUBIC)
             motion = self.transform(motion)
-
+            return crops, motion, self.list_of_uuids[index]
         return crops, self.list_of_uuids[index]

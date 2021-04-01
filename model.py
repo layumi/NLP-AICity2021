@@ -115,6 +115,11 @@ class ft_net(nn.Module):
             model_ft.avgpool = nn.AdaptiveAvgPool2d((1,1))
             self.model = model_ft
             self.classifier = ClassBlock(2048, class_num, droprate, return_f = circle)
+        elif pool == 'gem':
+            model_ft.avgpool2 = GeM(dim=2048, p =1)
+            model_ft.maxpool2 = GeM(dim=2048, p =5)
+            self.model = model_ft
+            self.classifier = ClassBlock(4096, class_num, droprate, return_f = circle)
 
         self.flag = False
         if init_model!=None:
@@ -135,7 +140,7 @@ class ft_net(nn.Module):
         x = self.model.layer2(x)
         x = self.model.layer3(x)
         x = self.model.layer4(x)
-        if self.pool == 'avg+max':
+        if self.pool == 'avg+max' or self.pool == 'gem':
             x1 = self.model.avgpool2(x)
             x2 = self.model.maxpool2(x)
             x = torch.cat((x1,x2), dim = 1)
@@ -228,12 +233,13 @@ class ft_net_dense(nn.Module):
             model_ft.features.avgpool = nn.Sequential()
             model_ft.avgpool2 = nn.AdaptiveAvgPool2d((1,1))
             model_ft.maxpool2 = nn.AdaptiveMaxPool2d((1,1))
-            self.model = model_ft
-            self.classifier = ClassBlock(2048, class_num, droprate, return_f = circle)
+        elif pool == 'gem':
+            model_ft.avg_pool2 = GeM(dim=2048, p =1)
+            model_ft.max_pool2 = GeM(dim=2048, p =5)
         elif pool=='avg':
             model_ft.features.avgpool = nn.AdaptiveAvgPool2d((1,1))
-            self.model = model_ft
-            self.classifier = ClassBlock(1024, class_num, droprate, return_f = circle)
+        self.model = model_ft
+        self.classifier = ClassBlock(1024, class_num, droprate, return_f = circle)
 
         self.flag = False
         if init_model!=None:
@@ -631,7 +637,7 @@ if __name__ == '__main__':
 # Here I left a simple forward function.
 # Test the model, before you train it. 
     #net = ft_net_EF5(751, noisy=True)
-    net = ft_net_SE(751, pool='gem')
+    net = ft_net(751, pool='gem')
     print(net)
     input = Variable(torch.FloatTensor(4, 3, 256, 256))
     output = net(input)
