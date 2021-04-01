@@ -95,6 +95,9 @@ def load_network(name, opt):
     opt.angle = config['angle']
     opt.arc = config['arc']
 
+    if not 'netvlad' in config:
+        opt.netvlad = False
+ 
     # load model
     if isinstance(epoch, int):
         save_filename = 'net_%03d.pth'% epoch

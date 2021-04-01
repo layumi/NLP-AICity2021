@@ -7,6 +7,65 @@ from torch.autograd import Variable
 from efficientnet_pytorch import EfficientNet
 import pretrainedmodels
 from torch.nn import functional as F
+import numpy as np
+
+class NetVLAD(nn.Module):
+    """NetVLAD layer implementation"""
+
+    def __init__(self, num_clusters=8, dim=128, alpha=100.0,
+                 normalize_input=True):
+        """
+        Args:
+            num_clusters : int
+                The number of clusters
+            dim : int
+                Dimension of descriptors
+            alpha : float
+                Parameter of initialization. Larger value is harder assignment.
+            normalize_input : bool
+                If true, descriptor-wise L2 normalization is applied to input.
+        """
+        super(NetVLAD, self).__init__()
+        self.num_clusters = num_clusters
+        self.dim = dim
+        self.alpha = alpha
+        self.normalize_input = normalize_input
+        self.conv = nn.Conv2d(dim, num_clusters, kernel_size=(1, 1), bias=True)
+        self.centroids = nn.Parameter(torch.rand(num_clusters, dim))
+        self._init_params()
+
+    def _init_params(self):
+        self.conv.weight = nn.Parameter(
+            (2.0 * self.alpha * self.centroids).unsqueeze(-1).unsqueeze(-1)
+        )
+        self.conv.bias = nn.Parameter(
+            - self.alpha * self.centroids.norm(dim=1)
+        )
+
+    def forward(self, x):
+        N, C = x.shape[:2]
+
+        if self.normalize_input:
+            x = F.normalize(x, p=2, dim=1)  # across descriptor dim
+
+        # soft-assignment
+        soft_assign = self.conv(x).view(N, self.num_clusters, -1)
+        soft_assign = F.softmax(soft_assign, dim=1)
+
+        x_flatten = x.view(N, C, -1)
+        
+        # calculate residuals to each clusters
+        residual = x_flatten.expand(self.num_clusters, -1, -1, -1).permute(1, 0, 2, 3) - \
+            self.centroids.expand(x_flatten.size(-1), -1, -1).permute(1, 2, 0).unsqueeze(0)
+        residual *= soft_assign.unsqueeze(2)
+        vlad = residual.sum(dim=-1)
+
+        vlad = F.normalize(vlad, p=2, dim=2)  # intra-normalization
+        vlad = vlad.view(x.size(0), -1)  # flatten
+        vlad = F.normalize(vlad, p=2, dim=1)  # L2 normalize
+
+        return vlad
+
 
 ######################################################################
 class GeM(nn.Module):
@@ -97,7 +156,7 @@ class ClassBlock(nn.Module):
 # Define the ResNet50-based Model
 class ft_net(nn.Module):
 
-    def __init__(self, class_num, droprate=0.5, stride=2, init_model=None, pool='avg+max', circle=False):
+    def __init__(self, class_num, droprate=0.5, stride=2, init_model=None, pool='avg+max', circle=False, netvlad = False):
         super(ft_net, self).__init__()
         model_ft = models.resnet50(pretrained=True)
         # avg pooling to global pooling
@@ -106,21 +165,22 @@ class ft_net(nn.Module):
             model_ft.layer4[0].conv2.stride = (1,1)
 
         self.pool = pool
-        if pool =='avg+max':
+        self.netvlad = netvlad
+        if self.netvlad:
+            self.vlad  = NetVLAD(dim = 2048)
+            self.classifier = ClassBlock(8*2048, class_num, droprate, return_f = circle)
+        elif pool =='avg+max':
             model_ft.avgpool2 = nn.AdaptiveAvgPool2d((1,1))
             model_ft.maxpool2 = nn.AdaptiveMaxPool2d((1,1))
-            self.model = model_ft
             self.classifier = ClassBlock(4096, class_num, droprate, return_f = circle)
         elif pool=='avg':
             model_ft.avgpool = nn.AdaptiveAvgPool2d((1,1))
-            self.model = model_ft
             self.classifier = ClassBlock(2048, class_num, droprate, return_f = circle)
         elif pool == 'gem':
             model_ft.avgpool2 = GeM(dim=2048, p =1)
             model_ft.maxpool2 = GeM(dim=2048, p =5)
-            self.model = model_ft
             self.classifier = ClassBlock(4096, class_num, droprate, return_f = circle)
-
+        self.model = model_ft
         self.flag = False
         if init_model!=None:
             self.flag = True
@@ -129,7 +189,6 @@ class ft_net(nn.Module):
             self.classifier.add_block = init_model.classifier.add_block
             self.classifier.return_f = circle
             self.new_dropout = nn.Sequential(nn.Dropout(p = droprate))
-        # avg pooling to global pooling
 
     def forward(self, x):
         x = self.model.conv1(x)
@@ -140,7 +199,10 @@ class ft_net(nn.Module):
         x = self.model.layer2(x)
         x = self.model.layer3(x)
         x = self.model.layer4(x)
-        if self.pool == 'avg+max' or self.pool == 'gem':
+
+        if self.netvlad: 
+            x = self.vlad(x)
+        elif self.pool == 'avg+max' or self.pool == 'gem':
             x1 = self.model.avgpool2(x)
             x2 = self.model.maxpool2(x)
             x = torch.cat((x1,x2), dim = 1)
@@ -148,12 +210,15 @@ class ft_net(nn.Module):
         elif self.pool == 'avg':
             x = self.model.avgpool(x)
             x = x.view(x.size(0), x.size(1))
+
         if self.flag:
             x = self.classifier.add_block(x)
             x = self.new_dropout(x)
             x = self.classifier.classifier(x)
         else:
             x = self.classifier(x)
+
+
         return x
 
 # Define the ResNet50  Model with angle loss
@@ -351,14 +416,19 @@ class ft_net_NAS(nn.Module):
 # Define the SE-based Model
 class ft_net_SE(nn.Module):
 
-    def __init__(self, class_num, droprate=0.5, stride=2, pool='avg', init_model=None, circle=False):
+    def __init__(self, class_num, droprate=0.5, stride=2, pool='avg', init_model=None, circle=False, netvlad=False):
         super().__init__()
         model_name = 'se_resnext101_32x4d' # could be fbresnet152 or inceptionresnetv2
         model_ft = pretrainedmodels.__dict__[model_name](num_classes=1000, pretrained='imagenet')
         if stride == 1:
             model_ft.layer4[0].conv2.stride = (1,1)
             model_ft.layer4[0].downsample[0].stride = (1,1)
-        if pool == 'avg':
+
+        self.netvlad = netvlad
+
+        if netvlad:
+            self.vlad = NetVLAD(dim=2048)
+        elif pool == 'avg':
             model_ft.avg_pool2 = nn.AdaptiveAvgPool2d((1,1))
         elif pool == 'max':
             model_ft.avg_pool2 = nn.AdaptiveMaxPool2d((1,1))
@@ -375,7 +445,9 @@ class ft_net_SE(nn.Module):
         self.model = model_ft
         self.pool  = pool
         # For DenseNet, the feature dim is 2048
-        if pool == 'avg+max' or self.pool == 'gem':
+        if netvlad:
+            self.classifier = ClassBlock(8*2048, class_num, droprate, return_f = circle)
+        elif pool == 'avg+max' or self.pool == 'gem':
             self.classifier = ClassBlock(4096, class_num, droprate, return_f = circle)
         else:
             self.classifier = ClassBlock(2048, class_num, droprate, return_f = circle)
@@ -392,7 +464,9 @@ class ft_net_SE(nn.Module):
 
     def forward(self, x):
         x = self.model.features(x)
-        if self.pool == 'avg+max' or self.pool == 'gem':
+        if self.netvlad:
+            x = self.vlad(x)
+        elif self.pool == 'avg+max' or self.pool == 'gem':
             x1 = self.model.avg_pool2(x)
             x2 = self.model.max_pool2(x)
             x = torch.cat((x1,x2), dim = 1)
@@ -637,9 +711,9 @@ if __name__ == '__main__':
 # Here I left a simple forward function.
 # Test the model, before you train it. 
     #net = ft_net_EF5(751, noisy=True)
-    net = ft_net(751, pool='gem')
+    net = ft_net_SE(751, netvlad = True)
     print(net)
     input = Variable(torch.FloatTensor(4, 3, 256, 256))
     output = net(input)
     print('net output size:')
-    #print(output.shape)
+    print(output.shape)
