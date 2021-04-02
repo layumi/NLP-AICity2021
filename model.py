@@ -44,6 +44,7 @@ class NetVLAD(nn.Module):
 
     def forward(self, x):
         N, C = x.shape[:2]
+        mean_x = torch.mean(torch.mean(x, dim=3), dim=2).view(N, self.dim)
 
         if self.normalize_input:
             x = F.normalize(x, p=2, dim=1)  # across descriptor dim
@@ -63,7 +64,9 @@ class NetVLAD(nn.Module):
         vlad = F.normalize(vlad, p=2, dim=2)  # intra-normalization
         vlad = vlad.view(x.size(0), -1)  # flatten
         vlad = F.normalize(vlad, p=2, dim=1)  # L2 normalize
-
+        
+        # add identity mapping
+        vlad = torch.cat( (vlad, mean_x), dim=1)
         return vlad
 
 
@@ -168,7 +171,7 @@ class ft_net(nn.Module):
         self.netvlad = netvlad
         if self.netvlad:
             self.vlad  = NetVLAD(dim = 2048)
-            self.classifier = ClassBlock(8*2048, class_num, droprate, return_f = circle)
+            self.classifier = ClassBlock(9*2048, class_num, droprate, return_f = circle)
         elif pool =='avg+max':
             model_ft.avgpool2 = nn.AdaptiveAvgPool2d((1,1))
             model_ft.maxpool2 = nn.AdaptiveMaxPool2d((1,1))
@@ -446,7 +449,7 @@ class ft_net_SE(nn.Module):
         self.pool  = pool
         # For DenseNet, the feature dim is 2048
         if netvlad:
-            self.classifier = ClassBlock(8*2048, class_num, droprate, return_f = circle)
+            self.classifier = ClassBlock(9*2048, class_num, droprate, return_f = circle)
         elif pool == 'avg+max' or self.pool == 'gem':
             self.classifier = ClassBlock(4096, class_num, droprate, return_f = circle)
         else:

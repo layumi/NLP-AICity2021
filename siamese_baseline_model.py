@@ -48,7 +48,7 @@ class SiameseBaselineModel(torch.nn.Module):
             lang_embeds = lang_embeds.transpose(1,2).contiguous().unsqueeze(-1)
         else:
             lang_embeds = torch.mean(outputs.last_hidden_state, dim=1)
-        lang_embeds = self.lang_fc(lang_embeds) # 4096
+        lang_embeds = self.lang_fc(lang_embeds) # 2048
         predict_class_l, lang_embeds = self.resnet50.classifier(lang_embeds) # 3028, 512
         predict_class_v, visual_embeds = self.resnet50(crops) # 3028, 512
         if self.motion:
