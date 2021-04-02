@@ -183,5 +183,5 @@ class CityFlowNLInferenceDataset(Dataset):
             motion = Image.open('motions/%04d.jpg'%(2498+index)).convert('RGB')
             motion = motion.resize((self.data_cfg.CROP_SIZE, self.data_cfg.CROP_SIZE) , Image.BICUBIC)
             motion = self.transform(motion)
-            return crops, motion, self.list_of_uuids[index]
+            return [crops, motion], self.list_of_uuids[index]
         return crops, self.list_of_uuids[index]

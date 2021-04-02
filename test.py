@@ -124,26 +124,37 @@ def extract_feature_l(model,dataloaders):
 
 def extract_feature_v(model, dataloaders):
     features = {}
+    motion_features = {}
     count = 0
     model.resnet50 =  torch.nn.DataParallel(model.resnet50)
+    if model.motion:
+        model.resnet50_m =  torch.nn.DataParallel(model.resnet50_m)
     for data, gallery_id in tqdm(dataloaders): # return one track
-        data = data[0]
-        n, c, h, w = data.size()
-        print(data.size(), gallery_id)
+        frame_data = data[0]
+        #print(frame_data.shape)
+        if model.motion:
+            frame_data = frame_data[0]
+            motion_data = data[1]
+            _, motion_f = model.resnet50_m(motion_data)
+            fnorm = torch.norm(motion_f, p=2, dim=0, keepdim=True)
+            motion_f = motion_f.div(fnorm.expand_as(motion_f))
+            motion_features[gallery_id] =  motion_f
+        n, c, h, w = frame_data.size()
+        #print(frame_data.size(), gallery_id)
         for j in range(0, n, opt.batchsize):
-            img = data[j:min(j+opt.batchsize,n),:,:,:]
+            img = frame_data[j:min(j+opt.batchsize,n),:,:,:]
             ff = torch.FloatTensor(1,512).zero_().cuda()
-            for i in range(2):
-                if(i==1):
-                    img = fliplr(img)
-                input_img = Variable(img.cuda())
-                for scale in ms:
-                    if scale != 1:
-                        input_img = nn.functional.interpolate(input_img, scale_factor=scale, mode='bilinear', align_corners=False)
-                    _, outputs = model.resnet50(input_img)
-                    fnorm = torch.norm(outputs, p=2, dim=1, keepdim=True)
-                    outputs = outputs.div(fnorm.expand_as(outputs))
-                    ff += torch.sum(outputs, dim=0)
+            #for i in range(2):
+                #if(i==1): 
+                #    img = fliplr(img)
+            input_img = Variable(img.cuda())
+            for scale in ms:
+                if scale != 1:
+                    input_img = nn.functional.interpolate(input_img, scale_factor=scale, mode='bilinear', align_corners=False)
+                _, outputs = model.resnet50(input_img)
+                fnorm = torch.norm(outputs, p=2, dim=1, keepdim=True)
+                outputs = outputs.div(fnorm.expand_as(outputs))
+                ff += torch.sum(outputs, dim=0)
             if gallery_id in features:
                 features[gallery_id] +=ff
             else:
@@ -151,7 +162,10 @@ def extract_feature_v(model, dataloaders):
         names.append(gallery_id)
     # Normalize
     for gallery_id in features:
-        ff = features[gallery_id]
+        if model.motion:
+            ff = features[gallery_id] + motion_features[gallery_id]
+        else:
+            ff = features[gallery_id]
         fnorm = torch.norm(ff, p=2, dim=0, keepdim=True)
         ff = ff.div(fnorm.expand_as(ff))
         features[gallery_id] = torch.squeeze(ff).cpu().numpy()

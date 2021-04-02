@@ -94,7 +94,7 @@ def load_network(name, opt):
     opt.balance = config['balance']
     opt.angle = config['angle']
     opt.arc = config['arc']
-
+    opt.motion = config['motion']
     if not 'netvlad' in config:
         opt.netvlad = False
  
