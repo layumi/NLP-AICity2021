@@ -38,7 +38,10 @@ class CityFlowNLDataset(Dataset):
         self.list_of_crops = list()
         train_num = len(self.list_of_uuids)
         self.transform = transforms.Compose(
-                       [transforms.ToTensor(),
+                       [
+                        transforms.Pad(10),
+                        transforms.RandomCrop((data_cfg.CROP_SIZE, self.data_cfg.CROP_SIZE)),
+                        transforms.ToTensor(),
                         transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5)),
                         RandomErasing(probability=0.5) ])
 

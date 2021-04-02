@@ -157,7 +157,7 @@ def l2_norm(v):
 
 def compute_loss(model, input_ids, attention_mask, crop, motion, nl_id, crop_id, label, warm):
     if opt.motion:
-        visual_embeds, lang_embeds, motion_embeds, predict_class_v, predict_class_l = model.forward(input_ids, attention_mask, crop, motion.cuda())
+        visual_embeds, lang_embeds, predict_class_v, predict_class_l = model.forward(input_ids, attention_mask, crop, motion.cuda())
     else:
         visual_embeds, lang_embeds, predict_class_v, predict_class_l = model.forward(input_ids, attention_mask, crop)
     #print(similarity.shape, predict_class_v.shape, predict_class_l.shape)
@@ -166,20 +166,12 @@ def compute_loss(model, input_ids, attention_mask, crop, motion, nl_id, crop_id,
     if opt.ddloss:
         visual_embeds = visual_embeds.t()
         lang_embeds =lang_embeds.t()
-        if opt.motion:
-            motion_embeds = motion_embeds.t()
     
     sim1 = torch.mm(l2_norm(visual_embeds)*torch.exp(model.module.logit_scale1), torch.t(l2_norm(lang_embeds))) 
     sim2 = sim1.t()
     sim_label = torch.arange(sim1.size(0)).cuda().detach()
     sim_label[np.argwhere(nl_id==-1)] = -1 
     loss_con = F.cross_entropy(sim1, sim_label, ignore_index = -1) + F.cross_entropy(sim2, sim_label, ignore_index = -1)
-
-    if opt.motion:
-        sim3 = torch.mm(l2_norm(motion_embeds)*torch.exp(model.module.logit_scale2), torch.t(l2_norm(lang_embeds)))
-        sim4 = sim3.t()
-        loss_con2 = F.cross_entropy(sim3, sim_label, ignore_index = -1) + F.cross_entropy(sim4, sim_label, ignore_index = -1)
-        loss_con = 0.5*loss_con + 0.5*loss_con2
 
     loss_cv =  F.cross_entropy(predict_class_v, crop_id.cuda(), ignore_index = -1)
     #print(nl_id)
@@ -341,6 +333,7 @@ model = torch.nn.DataParallel(model, device_ids=opt.gpu_ids).cuda()
 
 ignored_params = list(map(id, model.module.lang_fc.parameters() )) + list(map(id, model.module.resnet50.classifier.parameters() ))\
                      + list(map(id, model.module.bert_model.parameters() ))
+
 base_params = filter(lambda p: id(p) not in ignored_params, model.parameters())
 
 if opt.sam:

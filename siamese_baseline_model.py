@@ -23,13 +23,17 @@ class SiameseBaselineModel(torch.nn.Module):
         #self.lang_fc = torch.nn.Linear(768, 1024)
         if model_cfg.netvlad:
             self.lang_fc = torch.nn.Sequential(*[
-                    torch.nn.conv1d(768, 2048, kernel_size=(1,1)),
+                    torch.nn.Conv1d(768, 2048, kernel_size=(1,1)),
                     NetVLAD(dim=2048) ])
         else:
             self.lang_fc = torch.nn.Linear(768, 4096)
         self.motion = model_cfg.motion
         if model_cfg.motion:
-            self.resnet50_m = ft_net( class_num = 2498, droprate=0.2, stride=1, pool='gem', circle =True, init_model = None)
+            self.resnet50_m = ft_net( class_num = 2498, droprate=0.2, stride=1, pool='gem', circle =True, init_model = None, netvlad = model_cfg.netvlad)
+            self.resnet50_m.classifier = self.resnet50.classifier #share classifier
+            self.car_fc = torch.nn.Linear(512, 512)
+            self.bg_fc = torch.nn.Linear(512, 512)
+            self.combine_v = torch.nn.Linear(1024, 512)
         if model_cfg.deberta:
             self.bert_model = deberta.DeBERTa(pre_trained='base') 
             self.bert_model.apply_state()
@@ -41,14 +45,16 @@ class SiameseBaselineModel(torch.nn.Module):
             outputs = self.bert_model(input_ids, attention_mask = attention_mask)
         if self.netvlad:
             lang_embeds = outputs.last_hidden_state
+            lang_embeds = lang_embeds.transpose(1,2).contiguous().unsqueeze(-1)
         else:
             lang_embeds = torch.mean(outputs.last_hidden_state, dim=1)
         lang_embeds = self.lang_fc(lang_embeds) # 4096
         predict_class_l, lang_embeds = self.resnet50.classifier(lang_embeds) # 3028, 512
         predict_class_v, visual_embeds = self.resnet50(crops) # 3028, 512
         if self.motion:
-            _, motion_embeds = self.resnet50_m(crops) # 3028, 512
-            return visual_embeds, lang_embeds, motion_embeds, predict_class_v, predict_class_l
+            predict_class_m, motion_embeds = self.resnet50_m(crops) # 3028, 512
+            predict_class_v = predict_class_m + predict_class_v
+            visual_embeds = self.car_fc(visual_embeds) + self.bg_fc(motion_embeds) 
         #print(visual_embeds.shape)
         #print(lang_embeds.shape)
         #d = F.pairwise_distance(visual_embeds, lang_embeds)
@@ -61,7 +67,11 @@ class SiameseBaselineModel(torch.nn.Module):
                 outputs = self.bert_model(input_ids)[-1]
             else:
                 outputs = self.bert_model(input_ids, attention_mask = attention_mask)
-            lang_embeds = torch.mean(outputs.last_hidden_state, dim=1)
+            if self.netvlad:
+                lang_embeds = outputs.last_hidden_state
+                lang_embeds = lang_embeds.transpose(1,2).contiguous().unsqueeze(-1)
+            else:
+                lang_embeds = torch.mean(outputs.last_hidden_state, dim=1)
             lang_embeds = self.lang_fc(lang_embeds)
             _, lang_embeds = self.resnet50.classifier(lang_embeds) # 3028, 512
         return lang_embeds
