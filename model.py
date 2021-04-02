@@ -459,7 +459,8 @@ class ft_net_SE(nn.Module):
             if self.pool == 'avg+max':
                 self.model.avg_pool2 = GeM(dim=2048,p=1)
                 self.model.max_pool2 = GeM(dim=2048,p=5)
-            #self.classifier.add_block = init_model.classifier.add_block
+            if not netvlad:
+                self.classifier.add_block = init_model.classifier.add_block
             self.new_dropout = nn.Sequential(nn.Dropout(p = droprate))
 
     def forward(self, x):
