@@ -351,8 +351,8 @@ else:
 
 
 optimizer = optim_method([
-             {'params': base_params, 'lr': 0.1*opt.lr,},
-             {'params': model.module.bert_model.parameters(), 'lr': 0.1*opt.lr,},
+             {'params': base_params, 'lr': 0.01*opt.lr,},
+             {'params': model.module.bert_model.parameters(), 'lr': 0.01*opt.lr,},
              {'params': model.module.lang_fc.parameters(), 'lr': opt.lr,},
              {'params': model.module.resnet50.classifier.parameters(), 'lr': opt.lr,}
          ], weight_decay=5e-4, momentum=0.9, nesterov=True)
