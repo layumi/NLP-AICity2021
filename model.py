@@ -10,11 +10,12 @@ from torch.nn import functional as F
 import numpy as np
 
 class NetVLAD(nn.Module):
-    def __init__(self, feature_size,  cluster_size=9, ghost_clusters=1,
+    def __init__(self, dim,  cluster_size=9, ghost_clusters=1,
                  add_batch_norm=True):
         super().__init__()
 
-        self.feature_size = feature_size
+        self.feature_size = dim
+        feature_size = dim
         self.cluster_size = cluster_size
         self.ghost_clusters = ghost_clusters
 
