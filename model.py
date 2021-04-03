@@ -183,6 +183,8 @@ class ft_net(nn.Module):
             model_ft.avgpool2 = GeM(dim=2048, p =1)
             model_ft.maxpool2 = GeM(dim=2048, p =5)
             self.classifier = ClassBlock(4096, class_num, droprate, return_f = circle)
+
+
         self.model = model_ft
         self.flag = False
         if init_model!=None:
@@ -431,7 +433,7 @@ class ft_net_SE(nn.Module):
 
         if netvlad:
             self.vlad = NetVLAD(dim=2048)
-        elif pool == 'avg':
+        if pool == 'avg':
             model_ft.avg_pool2 = nn.AdaptiveAvgPool2d((1,1))
         elif pool == 'max':
             model_ft.avg_pool2 = nn.AdaptiveMaxPool2d((1,1))
