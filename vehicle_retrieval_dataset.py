@@ -83,11 +83,6 @@ class CityFlowNLDataset(Dataset):
         #else:
         #    label = 0 #negative
         track = self.list_of_tracks[index]
-        if self.motion:
-            motion = Image.open('motions/%04d.jpg'%index).convert('RGB')
-            motion = motion.resize((self.data_cfg.CROP_SIZE, self.data_cfg.CROP_SIZE) , Image.BICUBIC)
-            #motion = self.aug(motion)
-            motion = self.transform(motion)
         frame_idx = int(random.uniform(0, len((track["frames"]))))
         frame_path = os.path.join(self.data_cfg.CITYFLOW_PATH, track["frames"][frame_idx])
         if not os.path.isfile(frame_path):
@@ -101,12 +96,19 @@ class CityFlowNLDataset(Dataset):
             w = frame.size[0]
             h = frame.size[1]
             pad = 5
+            x1, y1 = max(0, box[0]-pad), max(0, box[1]-pad)
+            x2, y2 = min(box[0] + box[2]+pad, w-1), min(box[1] + box[3]+pad, h-1)
             crop_id = track["track_id"]
-            crop = frame.crop( ( max(0, box[0]-pad), max(0, box[1]-pad) ,
-               min(box[0] + box[2]+pad, w-1), min(box[1] + box[3]+pad, h-1) ))
+            crop = frame.crop( ( x1, y1, x2, y2 ) )
             frame.close() # clean
+            if self.motion:
+                motion = Image.open('motions/%04d.jpg'%index).convert('RGB')
+                motion = motion.resize((motion.size[0]*4, motion.size[1]*4) , Image.BICUBIC) #restore
+                motion[:, x1:x2, y1:y2] = 0
+                motion[:, x1+pad:x2-pad, y1+pad:y2-pad] =crop[:, pad:-pad, pad:-pad]
+                motion = motion.resize((self.data_cfg.CROP_SIZE, self.data_cfg.CROP_SIZE) , Image.BICUBIC)
+                motion = self.transform(motion)
             crop = crop.resize((self.data_cfg.CROP_SIZE, self.data_cfg.CROP_SIZE) , Image.BICUBIC)
-            #crop = self.aug(crop)
             crop = self.transform(crop)
             #crop = torch.from_numpy(crop).permute([2, 0, 1]).to(
             #    dtype=torch.float32)
@@ -148,13 +150,21 @@ class CityFlowNLInferenceDataset(Dataset):
         crop = frame.crop( (max(0, box[0]-pad), max(0, box[1]-pad), 
                min(box[0] + box[2]+pad, w-1), min(box[1] + box[3]+pad, h-1)))
         frame.close()
+        motion = Image.open('motions/%04d.jpg'%index).convert('RGB')
+        motion = motion.resize((motion.size[0]*4, motion.size[1]*4) , Image.BICUBIC) #restore
+        motion[:, x1:x2, y1:y2] = 0
+        motion[:, x1+pad:x2-pad, y1+pad:y2-pad] =crop[:, pad:-pad, pad:-pad]
+        motion = motion.resize((self.data_cfg.CROP_SIZE, self.data_cfg.CROP_SIZE) , Image.BICUBIC)
+        crop = crop.resize((self.data_cfg.CROP_SIZE, self.data_cfg.CROP_SIZE) , Image.BICUBIC)
         if frame_idx == 0:
             save_path = './crops/%s.jpg'%self.one_id
             crop.save(save_path)
-        crop = crop.resize((self.data_cfg.CROP_SIZE, self.data_cfg.CROP_SIZE) , Image.BICUBIC)
+            save_path_motion = './crops/%s_m.jpg'%self.one_id
+            motion.save(save_path)
         crop = self.transform(crop)
         self.cropped_frames[frame_idx,:,:,:] = crop
-        
+        motion = self.transform(motion)
+        self.cropped_motions[frame_idx,:,:,:] = motion
         return
 
 
@@ -170,6 +180,7 @@ class CityFlowNLInferenceDataset(Dataset):
         self.one_id = self.list_of_uuids[index]
         dp.update(self.list_of_tracks[index])
         self.cropped_frames = torch.zeros( [len(dp["frames"]), 3, self.data_cfg.CROP_SIZE, self.data_cfg.CROP_SIZE])
+        self.cropped_motions = torch.zeros( [len(dp["frames"]), 3, self.data_cfg.CROP_SIZE, self.data_cfg.CROP_SIZE])
         frame_idx_iter, frame_path_iter, frame_box_iter = [],[],[]
         for frame_idx, frame_path in enumerate(dp["frames"]):
             frame_idx_iter.append(frame_idx)
@@ -182,9 +193,7 @@ class CityFlowNLInferenceDataset(Dataset):
             with Pool(4) as p:
                 p.map(self.read_img, zip(frame_idx_iter, frame_path_iter, frame_box_iter) )
         crops = self.cropped_frames
+        motions = self.cropped_motions
         if self.motion:
-            motion = Image.open('motions/%04d.jpg'%(2498+index)).convert('RGB')
-            motion = motion.resize((self.data_cfg.CROP_SIZE, self.data_cfg.CROP_SIZE) , Image.BICUBIC)
-            motion = self.transform(motion)
             return [crops, motion], self.list_of_uuids[index]
         return crops, self.list_of_uuids[index]

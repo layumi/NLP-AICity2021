@@ -10,64 +10,90 @@ from torch.nn import functional as F
 import numpy as np
 
 class NetVLAD(nn.Module):
-    """NetVLAD layer implementation"""
+    def __init__(self, feature_size,  cluster_size=9, ghost_clusters=1,
+                 add_batch_norm=True):
+        super().__init__()
 
-    def __init__(self, num_clusters=8, dim=128, alpha=100.0,
-                 normalize_input=True):
-        """
+        self.feature_size = feature_size
+        self.cluster_size = cluster_size
+        self.ghost_clusters = ghost_clusters
+
+        init_sc = (1 / math.sqrt(feature_size))
+        clusters = cluster_size + ghost_clusters
+
+        # The `clusters` weights are the `(w,b)` in the paper
+        self.clusters = nn.Parameter(init_sc * th.randn(feature_size, clusters))
+        self.batch_norm1 = nn.BatchNorm1d(clusters) if add_batch_norm else None
+        self.batch_norm2 = nn.BatchNorm1d(clusters) if add_batch_norm else None
+        # The `clusters2` weights are the visual words `c_k` in the paper
+        self.clusters1 = nn.Parameter(init_sc * th.randn(1, feature_size, cluster_size))
+        self.clusters2 = nn.Parameter(init_sc * th.randn(1, feature_size, cluster_size))
+        self.out_dim = self.cluster_size * feature_size
+
+    def forward(self, x, freeze=False, mask=None):
+        """Aggregates feature maps into a fixed size representation.  In the following
+        notation, B = batch_size, N = num_features, K = num_clusters, D = feature_size.
+
         Args:
-            num_clusters : int
-                The number of clusters
-            dim : int
-                Dimension of descriptors
-            alpha : float
-                Parameter of initialization. Larger value is harder assignment.
-            normalize_input : bool
-                If true, descriptor-wise L2 normalization is applied to input.
+            x (th.Tensor): B x N x D
+
+        Returns:
+            (th.Tensor): B x DK
         """
-        super(NetVLAD, self).__init__()
-        self.num_clusters = num_clusters
-        self.dim = dim
-        self.alpha = alpha
-        self.normalize_input = normalize_input
-        self.conv = nn.Conv2d(dim, num_clusters, kernel_size=(1, 1), bias=True)
-        self.centroids = nn.Parameter(torch.rand(num_clusters, dim))
-        self._init_params()
+        self.sanity_checks(x)
+        max_sample = x.size()[1]
+        x = x.view(-1, self.feature_size)  # B x N x D -> BN x D
 
-    def _init_params(self):
-        self.conv.weight = nn.Parameter(
-            (2.0 * self.alpha * self.centroids).unsqueeze(-1).unsqueeze(-1)
-        )
-        self.conv.bias = nn.Parameter(
-            - self.alpha * self.centroids.norm(dim=1)
-        )
+        if x.device != self.clusters.device:
+            msg = f"x.device {x.device} != cluster.device {self.clusters.device}"
+            raise ValueError(msg)
 
-    def forward(self, x):
-        N, C = x.shape[:2]
-        mean_x = torch.mean(torch.mean(x, dim=3), dim=2).view(N, self.dim)
+        if freeze == True:
+            clusters = self.clusters.detach()
+            clusters2 = self.clusters1
+            batch_norm =  self.batch_norm1
+        else:
+            clusters = self.clusters
+            clusters2 = self.clusters2
+            batch_norm =  self.batch_norm2
 
-        if self.normalize_input:
-            x = F.normalize(x, p=2, dim=1)  # across descriptor dim
+        assignment = th.matmul(x, clusters)  # (BN x D) x (D x (K+G)) -> BN x (K+G)
 
-        # soft-assignment
-        soft_assign = self.conv(x).view(N, self.num_clusters, -1)
-        soft_assign = F.softmax(soft_assign, dim=1)
+        if batch_norm:
+            assignment = batch_norm(assignment)
 
-        x_flatten = x.view(N, C, -1)
-        
-        # calculate residuals to each clusters
-        residual = x_flatten.expand(self.num_clusters, -1, -1, -1).permute(1, 0, 2, 3) - \
-            self.centroids.expand(x_flatten.size(-1), -1, -1).permute(1, 2, 0).unsqueeze(0)
-        residual *= soft_assign.unsqueeze(2)
-        vlad = residual.sum(dim=-1)
+        assignment = F.softmax(assignment, dim=1)  # BN x (K+G) -> BN x (K+G)
+        # remove ghost assigments
+        save_ass = assignment.view(-1, max_sample, self.cluster_size+1)
 
-        vlad = F.normalize(vlad, p=2, dim=2)  # intra-normalization
-        vlad = vlad.view(x.size(0), -1)  # flatten
-        vlad = F.normalize(vlad, p=2, dim=1)  # L2 normalize
-        
-        # add identity mapping
-        vlad = torch.cat( (vlad, mean_x), dim=1)
-        return vlad
+        assignment = assignment[:, :self.cluster_size]
+        assignment = assignment.view(-1, max_sample, self.cluster_size)  # -> B x N x K
+        a_sum = th.sum(assignment, dim=1, keepdim=True)  # B x N x K -> B x 1 x K
+        a = a_sum * self.clusters2
+
+        assignment = assignment.transpose(1, 2)  # B x N x K -> B x K x N
+
+        x = x.view(-1, max_sample, self.feature_size)  # BN x D -> B x N x D
+        vlad = th.matmul(assignment, x)  # (B x K x N) x (B x N x D) -> B x K x D
+        vlad = vlad.transpose(1, 2)  # -> B x D x K
+        vlad = vlad - a
+
+        # L2 intra norm
+        vlad_ = F.normalize(vlad)
+
+        # flattening + L2 norm
+        vlad = vlad_.reshape(-1, self.cluster_size * self.feature_size)  # -> B x DK
+        vlad = F.normalize(vlad)
+        return vlad, vlad_, save_ass  # B x DK
+
+    def sanity_checks(self, x):
+        """Catch any nans in the inputs/clusters"""
+        if th.isnan(th.sum(x)):
+            print("nan inputs")
+            ipdb.set_trace()
+        if th.isnan(self.clusters[0][0]):
+            print("nan clusters")
+            ipdb.set_trace()
 
 
 ######################################################################

@@ -352,6 +352,7 @@ optimizer = optim_method([
 
 if opt.fixed:
     optimizer = optim_method([
+             {'params': model.module.resnet50.model.parameters(), 'lr': 0.1*opt.lr,},
              {'params': model.module.lang_fc.parameters(), 'lr': opt.lr,},
              {'params': model.module.visual_fc.parameters(), 'lr': opt.lr,},
              {'params': model.module.resnet50.classifier.parameters(), 'lr': opt.lr,}
