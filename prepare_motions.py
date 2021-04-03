@@ -39,28 +39,27 @@ def save_motion(data):
                 else:
                     mean_frame += np.asarray(frame)/255
             mean_frame = mean_frame/len(track["frames"]) * 255
-
-'''
-            for frame_idx, frame in enumerate(track["frames"]):
-                if not frame_idx % interpret==0:
-                    continue
-                frame_path = os.path.join('data/cityflow/MTMC', track["frames"][frame_idx])
-                frame = Image.open(frame_path).convert('RGB')
-                box = track['boxes'][frame_idx]
-                w = frame.size[0]
-                h = frame.size[1]
-                pad_w, pad_h = round(box[2]/10), round(box[3]/10)
-                x1, y1 = max(0, box[0]-pad_w), max(0, box[1]-pad_h)
-                x2, y2 = min(box[0] + box[2]+pad_w, w-1), min(box[1] + box[3]+pad_h, h-1)
-                mean_frame[y1:y2, x1:x2,:] = 0 # black edge
-                pad = 0
-                x1, y1 = max(0, box[0]-pad), max(0, box[1]-pad)
-                x2, y2 = min(box[0] + box[2]+pad, w-1), min(box[1] + box[3]+pad, h-1)
-                crop = frame.crop( (x1,y1,x2,y2))
-                next_crop = np.asarray(crop)
-                mean_frame[y1:y2, x1:x2,:] = next_crop
-'''
+            #for frame_idx, frame in enumerate(track["frames"]):
+            #    if not frame_idx % interpret==0:
+            #        continue
+            #    frame_path = os.path.join('data/cityflow/MTMC', track["frames"][frame_idx])
+            #    frame = Image.open(frame_path).convert('RGB')
+            #    box = track['boxes'][frame_idx]
+            #    w = frame.size[0]
+            #    h = frame.size[1]
+            #    pad_w, pad_h = round(box[2]/10), round(box[3]/10)
+            #    x1, y1 = max(0, box[0]-pad_w), max(0, box[1]-pad_h)
+            #    x2, y2 = min(box[0] + box[2]+pad_w, w-1), min(box[1] + box[3]+pad_h, h-1)
+            #    mean_frame[y1:y2, x1:x2,:] = 0 # black edge
+            #    pad = 0
+            #    x1, y1 = max(0, box[0]-pad), max(0, box[1]-pad)
+            #    x2, y2 = min(box[0] + box[2]+pad, w-1), min(box[1] + box[3]+pad, h-1)
+            #    crop = frame.crop( (x1,y1,x2,y2))
+            #    next_crop = np.asarray(crop)
+            #    mean_frame[y1:y2, x1:x2,:] = next_crop
             mean_frame = Image.fromarray(np.uint8(mean_frame))
+            w = mean_frame.size[0]
+            h = mean_frame.size[1]
             mean_frame = mean_frame.resize((w//2, h//2) , Image.BICUBIC)
             save_path = './motions/%04d.jpg'%track_idx
             mean_frame.save(save_path)
