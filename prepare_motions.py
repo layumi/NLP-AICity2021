@@ -40,7 +40,7 @@ def save_motion(data):
                     mean_frame += np.asarray(frame)/255
             mean_frame = mean_frame/len(track["frames"]) * 255
 
-
+'''
             for frame_idx, frame in enumerate(track["frames"]):
                 if not frame_idx % interpret==0:
                     continue
@@ -59,6 +59,7 @@ def save_motion(data):
                 crop = frame.crop( (x1,y1,x2,y2))
                 next_crop = np.asarray(crop)
                 mean_frame[y1:y2, x1:x2,:] = next_crop
+'''
             mean_frame = Image.fromarray(np.uint8(mean_frame))
             mean_frame = mean_frame.resize((w//2, h//2) , Image.BICUBIC)
             save_path = './motions/%04d.jpg'%track_idx

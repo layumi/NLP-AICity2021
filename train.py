@@ -83,6 +83,7 @@ parser.add_argument('--circle', action='store_true', help='use Circle loss' )
 parser.add_argument('--motion', action='store_true', help='use motion' )
 parser.add_argument('--ddloss', action='store_true', help='use ddloss' )
 parser.add_argument('--netvlad', action='store_true', help='use netvlad' )
+parser.add_argument('--fixed', action='store_true', help='use netvlad' )
 parser.add_argument('--noisy', action='store_true', help='use model trained with noisy student' )
 parser.add_argument('--warm_epoch', default=10, type=int, help='the first K epoch that needs warm up')
 parser.add_argument('--num_epoch', default=80, type=int, help='the first K epoch that needs warm up')
@@ -122,7 +123,7 @@ if len(opt.gpu_ids)>0:
 dataset = CityFlowNLDataset(opt)
 dataset_size = len(dataset)
 dataloader = torch.utils.data.DataLoader(dataset, batch_size=opt.batchsize,
-                            shuffle=True, num_workers=4, pin_memory=True, drop_last=True)
+                            shuffle=True, num_workers=8, pin_memory=True, drop_last=True)
 
 use_gpu = torch.cuda.is_available()
 
@@ -348,6 +349,14 @@ optimizer = optim_method([
              {'params': model.module.lang_fc.parameters(), 'lr': opt.lr,},
              {'params': model.module.resnet50.classifier.parameters(), 'lr': opt.lr,}
          ], weight_decay=5e-4, momentum=0.9, nesterov=True)
+
+if opt.fixed:
+    optimizer = optim_method([
+             {'params': model.module.lang_fc.parameters(), 'lr': opt.lr,},
+             {'params': model.module.visual_fc.parameters(), 'lr': opt.lr,},
+             {'params': model.module.resnet50.classifier.parameters(), 'lr': opt.lr,}
+         ], weight_decay=5e-4, momentum=0.9, nesterov=True)
+
 if opt.adam:
     optimizer_ft = optim.Adam(model.parameters(), opt.lr, weight_decay=5e-4)
 

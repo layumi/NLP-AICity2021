@@ -479,13 +479,6 @@ class ft_net_SE(nn.Module):
         else:
             x = self.model.avg_pool2(x)
         x = x.view(x.size(0), x.size(1))
-        # Convolution layers
-        # Pooling and final linear layer
-        #if self.flag:
-        #    x = self.classifier.add_block(x)
-        #    x = self.new_dropout(x)
-        #    x = self.classifier.classifier(x)
-        #else:
         x = self.classifier(x)
         return x
 
