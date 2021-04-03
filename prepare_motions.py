@@ -60,7 +60,7 @@ def save_motion(data):
             mean_frame = Image.fromarray(np.uint8(mean_frame))
             w = mean_frame.size[0]
             h = mean_frame.size[1]
-            mean_frame = mean_frame.resize((w//2, h//2) , Image.BICUBIC)
+            mean_frame = mean_frame.resize((w//4, h//4) , Image.BICUBIC)
             save_path = './motions/%04d.jpg'%track_idx
             mean_frame.save(save_path)
 
