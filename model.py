@@ -7,6 +7,7 @@ from torch.autograd import Variable
 from efficientnet_pytorch import EfficientNet
 import pretrainedmodels
 from torch.nn import functional as F
+import math
 import numpy as np
 
 class NetVLAD(nn.Module):

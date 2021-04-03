@@ -30,7 +30,7 @@ import numpy as np
 from DeBERTa import deberta
 from transformers import AutoTokenizer
 import utils_T2
-from utils import get_model_list, load_network, save_network, make_weights_for_balanced_classes
+from utils import get_model_list, load_network, save_network, ContrastiveLoss, make_weights_for_balanced_classes
 from circle_loss import CircleLoss, convert_label_to_similarity
 
 version =  torch.__version__
@@ -82,6 +82,7 @@ parser.add_argument('--track2', action='store_true', help='use arc loss' )
 parser.add_argument('--circle', action='store_true', help='use Circle loss' )
 parser.add_argument('--motion', action='store_true', help='use motion' )
 parser.add_argument('--ddloss', action='store_true', help='use ddloss' )
+parser.add_argument('--xhloss', action='store_true', help='use conloss' )
 parser.add_argument('--netvlad', action='store_true', help='use netvlad' )
 parser.add_argument('--fixed', action='store_true', help='use netvlad' )
 parser.add_argument('--noisy', action='store_true', help='use model trained with noisy student' )
@@ -156,6 +157,7 @@ def l2_norm(v):
     v = v.div(fnorm.expand_as(v))
     return v
 
+xhloss = ContrastiveLoss()
 def compute_loss(model, input_ids, attention_mask, crop, motion, nl_id, crop_id, label, warm):
     if opt.motion:
         visual_embeds, lang_embeds, predict_class_v, predict_class_l = model.forward(input_ids, attention_mask, crop, motion.cuda())
@@ -164,21 +166,26 @@ def compute_loss(model, input_ids, attention_mask, crop, motion, nl_id, crop_id,
     #print(similarity.shape, predict_class_v.shape, predict_class_l.shape)
     #print(label.shape, nl_id.shape)
     #label = label.float()
+
+    visual_embeds = l2_norm(visual_embeds)    
+    lang_embeds = l2_norm(lang_embeds)    
+    if opt.xhloss:
+        loss_xh = xhloss(torch.mm(visual_embeds, torch.t(lang_embeds)))
+
     if opt.ddloss:
         visual_embeds = visual_embeds.t()
         lang_embeds =lang_embeds.t()
-    
-    sim1 = torch.mm(l2_norm(visual_embeds)*torch.exp(model.module.logit_scale1), torch.t(l2_norm(lang_embeds))) 
+    sim1 = torch.mm(visual_embeds*torch.exp(model.module.logit_scale1), torch.t(lang_embeds)) 
     sim2 = sim1.t()
     sim_label = torch.arange(sim1.size(0)).cuda().detach()
     sim_label[np.argwhere(nl_id==-1)] = -1 
     loss_con = F.cross_entropy(sim1, sim_label, ignore_index = -1) + F.cross_entropy(sim2, sim_label, ignore_index = -1)
-
     loss_cv =  F.cross_entropy(predict_class_v, crop_id.cuda(), ignore_index = -1)
     #print(nl_id)
     loss_nl =  F.cross_entropy(predict_class_l, nl_id.cuda(), ignore_index = -1)
-    loss_total = loss_con/2 + loss_cv + loss_nl
-    print('\r\rtotal:%.4f  loss_con:%.4f loss_cv:%.4f loss_nl:%.4f warmup:%.4f'%(loss_total, loss_con, loss_cv, loss_nl, warm), end="" )
+  
+    loss_total = 0*loss_con/2 + loss_cv + loss_nl + loss_xh
+    print('\r\rtotal:%.4f  loss_con:%.4f loss_cv:%.4f loss_nl:%.4f loss_xh:%.4f  warmup:%.4f'%(loss_total, loss_con, loss_cv, loss_nl, loss_xh, warm), end="" )
     return loss_total
 
 
