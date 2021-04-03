@@ -159,10 +159,7 @@ def extract_feature_v(model, dataloaders):
         names.append(gallery_id)
     # Normalize
     for gallery_id in features:
-        if model.motion:
-            ff = features[gallery_id] + motion_features[gallery_id]
-        else:
-            ff = features[gallery_id]
+        ff = features[gallery_id]
         fnorm = torch.norm(ff, p=2, dim=0, keepdim=True)
         ff = ff.div(fnorm.expand_as(ff))
         features[gallery_id] = torch.squeeze(ff).cpu().numpy()
