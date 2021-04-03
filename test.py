@@ -134,7 +134,7 @@ def extract_feature_v(model, dataloaders):
         if model.motion:
             frame_data = frame_data[0]
             motion_data = data[1]
-            _, motion_embeds = model.resnet50_m(motion_data)
+            _, motion_embeds = model.resnet50_m(motion_data.cuda())
         n, c, h, w = frame_data.size()
         #print(frame_data.size(), gallery_id)
         for j in range(0, n, opt.batchsize):
