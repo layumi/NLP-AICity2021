@@ -24,19 +24,19 @@ class SiameseBaselineModel(torch.nn.Module):
             self.lang_fc = torch.nn.Sequential(*[
                     NetVLAD(dim=768),
                     torch.nn.Linear(9*768, 4096) ])
-            self.visual_fc = torch.nn.Sequential(*[
-                    torch.nn.Conv2d(2048, 768, kernel_size=(1,1)),
-                    NetVLAD(dim=768),
-                    torch.nn.Linear(9*768, 4096) ])
+            #self.visual_fc = torch.nn.Sequential(*[
+            #        torch.nn.Conv2d(2048, 768, kernel_size=(1,1)),
+            #        NetVLAD(dim=768),
+            #        torch.nn.Linear(9*768, 4096) ])
         else:
             self.lang_fc = torch.nn.Sequential(*[
                       torch.nn.BatchNorm1d(768*2), 
                       torch.nn.Linear(768*2, 4096) ]) 
-            self.visual_fc = torch.nn.Sequential(*[
+        self.visual_fc = torch.nn.Sequential(*[
                       torch.nn.BatchNorm1d(4096),
                       torch.nn.Linear(4096, 4096) ])
-            self.lang_fc.apply(weights_init_kaiming)
-            self.visual_fc.apply(weights_init_kaiming)
+        self.lang_fc.apply(weights_init_kaiming)
+        self.visual_fc.apply(weights_init_kaiming)
 
         self.motion = model_cfg.motion
         if model_cfg.motion:
@@ -68,15 +68,15 @@ class SiameseBaselineModel(torch.nn.Module):
 
         # embedding
         if self.netvlad:
-            lang_embeds = outputs.last_hidden_state
-            lang_embeds = lang_embeds.transpose(1,2).contiguous().unsqueeze(-1) # N, 768, length, 1
+            lang_embeds = outputs.last_hidden_state # N, length, 768
+            #visual_embeds = visual_embeds
         else:
             l1 = torch.mean(outputs.last_hidden_state, dim=1)
             l2, _ = torch.max(outputs.last_hidden_state, dim=1)
             lang_embeds = torch.cat((l1,l2), dim=1)
-            x1 = self.resnet50.model.avg_pool2(visual_embeds)
-            x2 = self.resnet50.model.max_pool2(visual_embeds)
-            visual_embeds = torch.cat((x1,x2), dim = 1) #4096
+        x1 = self.resnet50.model.avg_pool2(visual_embeds)
+        x2 = self.resnet50.model.max_pool2(visual_embeds)
+        visual_embeds = torch.cat((x1,x2), dim = 1) #4096
 
         lang_embeds = self.lang_fc(lang_embeds) # learned
         visual_embeds = self.visual_fc(visual_embeds) # learned

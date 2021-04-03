@@ -24,12 +24,12 @@ class NetVLAD(nn.Module):
         clusters = cluster_size + ghost_clusters
 
         # The `clusters` weights are the `(w,b)` in the paper
-        self.clusters = nn.Parameter(init_sc * th.randn(feature_size, clusters))
+        self.clusters = nn.Parameter(init_sc * torch.randn(feature_size, clusters))
         self.batch_norm1 = nn.BatchNorm1d(clusters) if add_batch_norm else None
         self.batch_norm2 = nn.BatchNorm1d(clusters) if add_batch_norm else None
         # The `clusters2` weights are the visual words `c_k` in the paper
-        self.clusters1 = nn.Parameter(init_sc * th.randn(1, feature_size, cluster_size))
-        self.clusters2 = nn.Parameter(init_sc * th.randn(1, feature_size, cluster_size))
+        self.clusters1 = nn.Parameter(init_sc * torch.randn(1, feature_size, cluster_size))
+        self.clusters2 = nn.Parameter(init_sc * torch.randn(1, feature_size, cluster_size))
         self.out_dim = self.cluster_size * feature_size
 
     def forward(self, x, freeze=False, mask=None):
@@ -59,7 +59,7 @@ class NetVLAD(nn.Module):
             clusters2 = self.clusters2
             batch_norm =  self.batch_norm2
 
-        assignment = th.matmul(x, clusters)  # (BN x D) x (D x (K+G)) -> BN x (K+G)
+        assignment = torch.matmul(x, clusters)  # (BN x D) x (D x (K+G)) -> BN x (K+G)
 
         if batch_norm:
             assignment = batch_norm(assignment)
@@ -70,13 +70,13 @@ class NetVLAD(nn.Module):
 
         assignment = assignment[:, :self.cluster_size]
         assignment = assignment.view(-1, max_sample, self.cluster_size)  # -> B x N x K
-        a_sum = th.sum(assignment, dim=1, keepdim=True)  # B x N x K -> B x 1 x K
+        a_sum = torch.sum(assignment, dim=1, keepdim=True)  # B x N x K -> B x 1 x K
         a = a_sum * self.clusters2
 
         assignment = assignment.transpose(1, 2)  # B x N x K -> B x K x N
 
         x = x.view(-1, max_sample, self.feature_size)  # BN x D -> B x N x D
-        vlad = th.matmul(assignment, x)  # (B x K x N) x (B x N x D) -> B x K x D
+        vlad = torch.matmul(assignment, x)  # (B x K x N) x (B x N x D) -> B x K x D
         vlad = vlad.transpose(1, 2)  # -> B x D x K
         vlad = vlad - a
 
@@ -90,10 +90,10 @@ class NetVLAD(nn.Module):
 
     def sanity_checks(self, x):
         """Catch any nans in the inputs/clusters"""
-        if th.isnan(th.sum(x)):
+        if torch.isnan(torch.sum(x)):
             print("nan inputs")
             ipdb.set_trace()
-        if th.isnan(self.clusters[0][0]):
+        if torch.isnan(self.clusters[0][0]):
             print("nan clusters")
             ipdb.set_trace()
 

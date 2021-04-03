@@ -171,7 +171,7 @@ def compute_loss(model, input_ids, attention_mask, crop, motion, nl_id, crop_id,
     lang_embeds = l2_norm(lang_embeds)    
     if opt.xhloss:
         loss_xh = xhloss(torch.mm(visual_embeds, torch.t(lang_embeds)))
-
+    #else:
     if opt.ddloss:
         visual_embeds = visual_embeds.t()
         lang_embeds =lang_embeds.t()
@@ -180,11 +180,13 @@ def compute_loss(model, input_ids, attention_mask, crop, motion, nl_id, crop_id,
     sim_label = torch.arange(sim1.size(0)).cuda().detach()
     sim_label[np.argwhere(nl_id==-1)] = -1 
     loss_con = F.cross_entropy(sim1, sim_label, ignore_index = -1) + F.cross_entropy(sim2, sim_label, ignore_index = -1)
+    if opt.xhloss:
+        loss_con = 0
+
     loss_cv =  F.cross_entropy(predict_class_v, crop_id.cuda(), ignore_index = -1)
-    #print(nl_id)
     loss_nl =  F.cross_entropy(predict_class_l, nl_id.cuda(), ignore_index = -1)
   
-    loss_total = 0*loss_con/2 + loss_cv + loss_nl + loss_xh
+    loss_total = loss_con/2 + loss_cv + loss_nl + loss_xh
     print('\r\rtotal:%.4f  loss_con:%.4f loss_cv:%.4f loss_nl:%.4f loss_xh:%.4f  warmup:%.4f'%(loss_total, loss_con, loss_cv, loss_nl, loss_xh, warm), end="" )
     return loss_total
 
