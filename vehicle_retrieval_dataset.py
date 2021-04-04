@@ -329,7 +329,7 @@ class VAL_CityFlowNLDataset(Dataset):
         nseg = 4
         self.one_id = index
         length = len((track["frames"])) // nseg
-        if self.motion:
+        if not self.nl and self.motion:
             nmotion = torch.zeros((nseg, 3, self.data_cfg.CROP_SIZE, self.data_cfg.CROP_SIZE))
             if len(track["frames"]) > nseg:
                 for i in range(nseg):
@@ -350,7 +350,8 @@ class VAL_CityFlowNLDataset(Dataset):
                     motion = frame.resize((self.data_cfg.CROP_SIZE, self.data_cfg.CROP_SIZE) , Image.BICUBIC)
                     motion = self.transform(motion)
                     nmotion[i,:,:,:] = motion
-
+        else: 
+            nmotion = torch.zeros(1)
         self.cropped_frames = torch.zeros((nseg, 3, self.data_cfg.CROP_SIZE, self.data_cfg.CROP_SIZE))
         frame_idx_iter, frame_path_iter, frame_box_iter = [],[],[]
         if len(track["frames"]) > nseg:
@@ -385,5 +386,5 @@ class VAL_CityFlowNLDataset(Dataset):
         nl_id = track["nl_id"]
         nl = track["nl"]
         if self.motion:
-            return nl, crop, nmotion, nl_id, crop_id, label
+            return nl, [crop, nmotion], nl_id, crop_id, label
         return nl, crop, nl_id, crop_id, label
