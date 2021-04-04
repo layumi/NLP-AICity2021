@@ -169,11 +169,12 @@ def compute_loss(model, input_ids, attention_mask, crop, motion, nl_id, crop_id,
 
     visual_embeds = l2_norm(visual_embeds)    
     lang_embeds = l2_norm(lang_embeds)    
-    loss_xh = xhloss(torch.mm(visual_embeds, torch.t(lang_embeds)))
-    #else:
+    if opt.xhloss:
+        loss_xh = xhloss(torch.mm(visual_embeds, torch.t(lang_embeds))) *opt.batchsize
     if opt.ddloss:
         visual_embeds = visual_embeds.t()
         lang_embeds =lang_embeds.t()
+    # dense triplet loss
     sim1 = torch.mm(visual_embeds*torch.exp(model.module.logit_scale1), torch.t(lang_embeds)) 
     sim2 = sim1.t()
     sim_label = torch.arange(sim1.size(0)).cuda().detach()
@@ -345,8 +346,8 @@ if start_epoch>=75:
 
 model = torch.nn.DataParallel(model, device_ids=opt.gpu_ids).cuda()
 
-ignored_params = list(map(id, model.module.lang_fc.parameters() )) + list(map(id, model.module.resnet50.classifier.parameters() ))\
-                     + list(map(id, model.module.bert_model.parameters() ))
+ignored_params = list(map(id, model.module.lang_fc.parameters() )) + list(map(id, model.module.visual_fc.parameters() )) +\
+         list(map(id, model.module.resnet50.classifier.parameters() ))+ list(map(id, model.module.bert_model.parameters() ))
 
 base_params = filter(lambda p: id(p) not in ignored_params, model.parameters())
 
@@ -357,9 +358,10 @@ else:
 
 
 optimizer = optim_method([
-             {'params': base_params, 'lr': 0.01*opt.lr,},
-             {'params': model.module.bert_model.parameters(), 'lr': 0.01*opt.lr,},
+             {'params': base_params, 'lr': 0.1*opt.lr,},
+             {'params': model.module.bert_model.parameters(), 'lr': 0.1*opt.lr,},
              {'params': model.module.lang_fc.parameters(), 'lr': opt.lr,},
+             {'params': model.module.visual_fc.parameters(), 'lr': opt.lr,},
              {'params': model.module.resnet50.classifier.parameters(), 'lr': opt.lr,}
          ], weight_decay=5e-4, momentum=0.9, nesterov=True)
 
@@ -376,7 +378,7 @@ if opt.adam:
 
 # Decay LR by a factor of 0.1 every 40 epochs
 #exp_lr_scheduler = lr_scheduler.StepLR(optimizer_ft, step_size=40, gamma=0.1)
-exp_lr_scheduler = lr_scheduler.MultiStepLR(optimizer, milestones=[round(0.75*opt.num_epoch-start_epoch), round(0.9*opt.num_epoch)-start_epoch], gamma=0.1)
+exp_lr_scheduler = lr_scheduler.MultiStepLR(optimizer, milestones=[round(0.8*opt.num_epoch-start_epoch), round(0.95*opt.num_epoch)-start_epoch], gamma=0.1)
 
 ######################################################################
 # Train and evaluate
@@ -392,6 +394,7 @@ if not opt.resume:
 #record every run
     copyfile('./train.py', dir_name+'/train.py')
     copyfile('./model.py', dir_name+'/model.py')
+    copyfile('./siamese_baseline_model.py', dir_name+'/siamese_baseline_model.py')
 # save opts
     with open('%s/opts.yaml'%dir_name,'w') as fp:
         yaml.dump(vars(opt), fp, default_flow_style=False)

@@ -173,7 +173,6 @@ def load_network(name, opt):
     save_path = os.path.join('./data/outputs',name,save_filename)
     print('Load the model from %s'%save_path)
     network = SiameseBaselineModel(opt).cuda()
- 
     try:
         network.load_state_dict(torch.load(save_path))
     except:
