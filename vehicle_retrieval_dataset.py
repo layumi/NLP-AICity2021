@@ -183,8 +183,8 @@ class CityFlowNLInferenceDataset(Dataset):
         nseg = 4
         track = dp
         length = len((track["frames"])) // nseg
-        nmotion = torch.zeros((nseg, 3, self.data_cfg.CROP_SIZE, self.data_cfg.CROP_SIZE))
         if self.motion:
+            nmotion = torch.zeros((nseg, 3, self.data_cfg.CROP_SIZE, self.data_cfg.CROP_SIZE))
             if len(track["frames"]) > nseg:
                 for i in range(nseg):
                     if i*length <=len(track["frames"]):
@@ -236,3 +236,154 @@ class CityFlowNLInferenceDataset(Dataset):
         if self.motion:
             return [crops, nmotion], self.list_of_uuids[index]
         return crops, self.list_of_uuids[index]
+
+
+class VAL_CityFlowNLDataset(Dataset):
+    def __init__(self, data_cfg, multi=1, nl=False):
+        """
+        Dataset for training.
+        :param data_cfg: CfgNode for CityFlow NL.
+        """
+        self.nl = nl 
+        self.multi = multi
+        self.motion = data_cfg.motion
+        self.data_cfg = data_cfg
+        self.aug = AutoAugment(auto_augment_policy(name='v0r', hparams=None))
+        with open(self.data_cfg.JSON_PATH) as f:
+            tracks = json.load(f)
+        f.close()
+        self.list_of_uuids = list(tracks.keys())
+        self.list_of_tracks = list(tracks.values())
+        self.list_of_crops = list()
+        train_num = len(self.list_of_uuids)
+        self.transform = transforms.Compose(
+                       [
+                        transforms.Pad(10),
+                        transforms.RandomCrop((data_cfg.CROP_SIZE, self.data_cfg.CROP_SIZE)),
+                        transforms.ToTensor(),
+                        transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5)),
+                        RandomErasing(probability=0.5) ])
+
+        if data_cfg.semi:
+            #cv
+            with open(self.data_cfg.EVAL_TRACKS_JSON_PATH) as f:
+                unlabel_tracks = json.load(f)
+            f.close()
+            self.list_of_uuids.extend(unlabel_tracks.keys())
+            self.list_of_tracks.extend(unlabel_tracks.values())
+            #nl
+            with open("data/test-queries.json", "r") as f:
+                unlabel_nl = json.load(f)
+            unlabel_nl_key = list(unlabel_nl.keys())
+
+        print('#track id (class): %d '%len(self.list_of_tracks))
+        count = 0
+        # add id and nl, -1 for unlabeled data
+        for track_idx, track in enumerate(self.list_of_tracks):
+            track["track_id"] = track_idx
+            track["nl_id"] = track_idx
+            # from 0 to train_num-1 is the id of the original training set. 
+            if track_idx>=train_num:
+                track["nl_id"] = -1
+                track["nl"] = unlabel_nl[unlabel_nl_key[count]]
+                count = count+1
+        self._logger = get_logger()
+
+    def __len__(self):
+        return len(self.list_of_tracks)*self.multi
+
+    def read_img(self, data):
+        frame_idx, frame_path, frame_box = data
+        if not os.path.isfile(frame_path):
+            print('missing %s'%frame_path)
+        frame = Image.open(frame_path).convert('RGB')
+        box = frame_box
+        w = frame.size[0]
+        h = frame.size[1]
+        pad = 5
+        crop = frame.crop( (max(0, box[0]-pad), max(0, box[1]-pad),
+               min(box[0] + box[2]+pad, w-1), min(box[1] + box[3]+pad, h-1)))
+        frame.close()
+        crop = crop.resize((self.data_cfg.CROP_SIZE, self.data_cfg.CROP_SIZE) , Image.BICUBIC)
+        #if frame_idx == 0:
+        #    save_path = './crops/%s.jpg'%self.one_id
+        #    crop.save(save_path)
+            #save_path_motion = './crops/%s_m.jpg'%self.one_id
+            #motion.save(save_path)
+        crop = self.transform(crop)
+        self.cropped_frames[frame_idx,:,:,:] = crop
+        #motion = self.transform(motion)
+        #self.cropped_motions[frame_idx,:,:,:] = motion
+        return
+
+    def __getitem__(self, index):
+        """
+        Get pairs of NL and cropped frame.
+        """
+        index = math.floor(index/self.multi) 
+        #if random.uniform(0, 1) > self.data_cfg.POSITIVE_THRESHOLD:
+        label = 1 #positive
+        #else:
+        #    label = 0 #negative
+        track = self.list_of_tracks[index]
+        nseg = 4
+        self.one_id = index
+        length = len((track["frames"])) // nseg
+        if self.motion:
+            nmotion = torch.zeros((nseg, 3, self.data_cfg.CROP_SIZE, self.data_cfg.CROP_SIZE))
+            if len(track["frames"]) > nseg:
+                for i in range(nseg):
+                    if i*length <=len(track["frames"]):
+                        frame_idx = round( (i*length+min( (i+1)*length, len((track["frames"]))))/2 )
+                        frame_idx = min(frame_idx, len((track["frames"])) -1 )
+                    else:
+                        frame_idx = len((track["frames"])) -1
+                    frame_path = os.path.join(self.data_cfg.CITYFLOW_PATH, track["frames"][frame_idx])
+                    frame = Image.open(frame_path).convert('RGB')
+                    motion = frame.resize((self.data_cfg.CROP_SIZE, self.data_cfg.CROP_SIZE) , Image.BICUBIC)
+                    motion = self.transform(motion)
+                    nmotion[i,:,:,:] = motion
+            else:
+                for i in range(len(track["frames"])):
+                    frame_path = os.path.join(self.data_cfg.CITYFLOW_PATH, track["frames"][i])
+                    frame = Image.open(frame_path).convert('RGB')
+                    motion = frame.resize((self.data_cfg.CROP_SIZE, self.data_cfg.CROP_SIZE) , Image.BICUBIC)
+                    motion = self.transform(motion)
+                    nmotion[i,:,:,:] = motion
+
+        self.cropped_frames = torch.zeros((nseg, 3, self.data_cfg.CROP_SIZE, self.data_cfg.CROP_SIZE))
+        frame_idx_iter, frame_path_iter, frame_box_iter = [],[],[]
+        if len(track["frames"]) > nseg:
+            for i in range(nseg):
+                if i*length <=len(track["frames"]):
+                    frame_idx = round( (i*length + min( (i+1)*length, len((track["frames"]))))/2 )
+                    frame_idx = min(frame_idx, len((track["frames"])) -1 )
+                else:
+                    frame_idx = len((track["frames"])) -1
+                frame_path = os.path.join(self.data_cfg.CITYFLOW_PATH, track["frames"][frame_idx])
+                frame_idx_iter.append(i)
+                frame_path_iter.append(frame_path)
+                frame_box_iter.append(track["boxes"][frame_idx])
+        else:
+            for i in range(len(track["frames"])):
+                frame_path = os.path.join(self.data_cfg.CITYFLOW_PATH, track["frames"][i])
+                frame_idx_iter.append(i)
+                frame_path_iter.append(frame_path)
+                frame_box_iter.append(track["boxes"][i])
+
+        if not self.nl:
+            if nseg<80:
+                for data in zip(frame_idx_iter, frame_path_iter, frame_box_iter):
+                    self.read_img(data)
+            else:
+                with Pool(4) as p:
+                    p.map(self.read_img, zip(frame_idx_iter, frame_path_iter, frame_box_iter) )
+            crop = self.cropped_frames
+        else:
+            crop = torch.ones(1) # for fast load nlp data
+        crop_id = track["track_id"]
+        nl_id = track["nl_id"]
+        nl = track["nl"]
+        if self.motion:
+            return nl, crop, nmotion, nl_id, crop_id, label
+        return nl, crop, nl_id, crop_id, label

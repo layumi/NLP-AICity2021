@@ -129,7 +129,12 @@ def extract_feature_v(model, dataloaders):
     count = 0
     for data, gallery_id in tqdm(dataloaders): # return one track
         frame_data = data[0]
-        n, c, h, w = frame_data.size()
+        if model.motion:
+            motion_data = data[1]
+            frame_data = frame_data[0]
+            n, c, h, w = frame_data.size()
+        else:
+            n, c, h, w = frame_data.size()
         #print(frame_data.size(), gallery_id)
         for j in range(0, n, opt.batchsize):
             img = frame_data[j:min(j+opt.batchsize,n),:,:,:]
@@ -141,7 +146,10 @@ def extract_feature_v(model, dataloaders):
             for scale in ms:
                 if scale != 1:
                     input_img = nn.functional.interpolate(input_img, scale_factor=scale, mode='bilinear', align_corners=False)
-                outputs = model.compute_visual_embed(input_img)
+                if model.motion:
+                    outputs = model.compute_visual_embed(input_img, motion_data.cuda() )
+                else:
+                    outputs = model.compute_visual_embed(input_img)
                 fnorm = torch.norm(outputs, p=2, dim=1, keepdim=True)
                 outputs = outputs.div(fnorm.expand_as(outputs))
                 ff += torch.sum(outputs, dim=0)
@@ -179,7 +187,7 @@ galleries = CityFlowNLInferenceDataset(opt)
 
 dataloaders = {}
 dataloaders['query'] = queries
-dataloaders['gallery'] = torch.utils.data.DataLoader(galleries, batch_size=1, num_workers=0, shuffle=False)
+dataloaders['gallery'] = torch.utils.data.DataLoader(galleries, batch_size=1, num_workers=4, shuffle=False)
 
 def save_pkl(name,data):
     f = open(name, "wb")

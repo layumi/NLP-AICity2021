@@ -21,7 +21,7 @@ from tqdm import tqdm
 import os
 import numpy as np
 from siamese_baseline_model import SiameseBaselineModel
-from vehicle_retrieval_dataset import CityFlowNLDataset
+from vehicle_retrieval_dataset import CityFlowNLDataset, VAL_CityFlowNLDataset
 from vehicle_retrieval_dataset import CityFlowNLInferenceDataset
 import yaml
 from shutil import copyfile
@@ -80,6 +80,7 @@ parser.add_argument('--angle', action='store_true', help='use angle loss' )
 parser.add_argument('--arc', action='store_true', help='use arc loss' )
 parser.add_argument('--circle', action='store_true', help='use Circle loss' )
 parser.add_argument('--motion', action='store_true', help='use Circle loss' )
+parser.add_argument('--semi', action='store_false', help='use Circle loss' )
 parser.add_argument('--netvlad', action='store_true', help='use Circle loss' )
 parser.add_argument('--noisy', action='store_true', help='use model trained with noisy student' )
 parser.add_argument('--warm_epoch', default=0, type=int, help='the first K epoch that needs warm up')
@@ -99,16 +100,42 @@ def fliplr(img):
     img_flip = img.index_select(3,inv_idx)
     return img_flip
 
+def compute_mAP(index, good_index, junk_index):
+    ap = 0
+    cmc = torch.IntTensor(len(index)).zero_()
+    if good_index.size==0:   # if empty
+        cmc[0] = -1
+        return ap,cmc
+
+    # remove junk_index
+    mask = np.in1d(index, junk_index, invert=True)
+    index = index[mask]
+
+    # find good_index index
+    ngood = len(good_index)
+    mask = np.in1d(index, good_index)
+    rows_good = np.argwhere(mask==True)
+    rows_good = rows_good.flatten()
+    
+    cmc[rows_good[0]:] = 1
+    for i in range(ngood):
+        d_recall = 1.0/ngood
+        precision = (i+1)*1.0/(rows_good[i]+1)
+        if rows_good[i]!=0:
+            old_precision = i*1.0/rows_good[i]
+        else:
+            old_precision=1.0
+        ap = ap + d_recall*(old_precision + precision)/2
+
+    return ap, cmc
+
 def extract_feature_l(model,dataloaders):
     features = {}
     count = 0
-    for query_id in tqdm(dataloaders):
-        nl3 = dataloaders[query_id]
-        ff = torch.FloatTensor(1,512).zero_().cuda()
+    for nl3, _, query_id, _, _ in tqdm(dataloaders):
         nl = []
         for i in range(len(nl3)):
-            nl.append( '[CLS]' + nl3[i].replace('Sedan', 'sedan').replace('suv','SUV').replace('Suv','SUV').replace('Jeep','jeep').replace('  ',' ') + '[SEP]')
-        
+            nl.append( '[CLS]' + nl3[i][0].replace('Sedan', 'sedan').replace('suv','SUV').replace('Suv','SUV').replace('Jeep','jeep').replace('  ',' ') + '[SEP]')
         tokens = bert_tokenizer.batch_encode_plus(nl, padding='longest',
                                                        return_tensors='pt')
         input_ids, attention_mask = tokens['input_ids'].cuda(), tokens['attention_mask'].cuda()
@@ -127,8 +154,7 @@ def extract_feature_v(model, dataloaders):
     features = {}
     motion_features = {}
     count = 0
-    model.resnet50 =  torch.nn.DataParallel(model.resnet50)
-    for data, gallery_id in tqdm(dataloaders): # return one track
+    for _, data, _, gallery_id, _  in tqdm(dataloaders): # return one track
         frame_data = data[0]
         #print(frame_data.shape)
         if model.motion:
@@ -147,8 +173,10 @@ def extract_feature_v(model, dataloaders):
             for scale in ms:
                 if scale != 1:
                     input_img = nn.functional.interpolate(input_img, scale_factor=scale, mode='bilinear', align_corners=False)
-                _, visual_embeds = model.resnet50(input_img)
-                outputs = model.car_fc(visual_embeds) + model.bg_fc(motion_embeds)
+                if model.motion:
+                    outputs = model.compute_visual_embed(input_img, motion_data.cuda() )
+                else:
+                    outputs = model.compute_visual_embed(input_img)
                 fnorm = torch.norm(outputs, p=2, dim=1, keepdim=True)
                 outputs = outputs.div(fnorm.expand_as(outputs))
                 ff += torch.sum(outputs, dim=0)
@@ -182,11 +210,13 @@ with open("data/test-queries.json", "r") as f:
     queries = json.load(f)
 
 # Gallery loader
-galleries = CityFlowNLInferenceDataset(opt)
-
-dataloaders = {}
-dataloaders['query'] = queries
-dataloaders['gallery'] = torch.utils.data.DataLoader(galleries, batch_size=1, num_workers=0, shuffle=False)
+dataset_nl = VAL_CityFlowNLDataset(opt,multi=1, nl=True)
+dataset_cv = VAL_CityFlowNLDataset(opt,multi=1)
+dataset_size = len(dataset_nl)
+dataloader_nl = torch.utils.data.DataLoader(dataset_nl, batch_size=1,
+                            shuffle=False, num_workers=2, pin_memory=True, drop_last=False)
+dataloader_cv = torch.utils.data.DataLoader(dataset_cv, batch_size=1,
+                            shuffle=False, num_workers=4, pin_memory=True, drop_last=False)
 
 def save_pkl(name,data):
     f = open(name, "wb")
@@ -205,13 +235,13 @@ if not os.path.isfile(snapshot_feature_mat+'_gallery.pkl'):
     with torch.no_grad():
         gallery_feature, query_feature  = {}, {}
         for model in models:
-            q_f = extract_feature_l(model,dataloaders['query']) 
+            q_f = extract_feature_l(model,dataloader_nl) 
             for q_id in q_f.keys():
                 if q_id in query_feature:
                     query_feature[q_id] = np.concatenate((query_feature[q_id],q_f[q_id]), 0)
                 else:
                     query_feature[q_id] = q_f[q_id]
-            g_f = extract_feature_v(model,dataloaders['gallery']) 
+            g_f = extract_feature_v(model,dataloader_cv) 
             for g_id in g_f.keys():
                 if g_id in gallery_feature:
                     gallery_feature[g_id] = np.concatenate((gallery_feature[g_id],g_f[g_id]), 0)
@@ -239,20 +269,24 @@ fnorm = torch.norm(gf_tensor, p=2, dim=1, keepdim=True) # 530
 #print(fnorm)
 gf_tensor = gf_tensor.div(fnorm.expand_as(gf_tensor))
 
-result = {}
-for qk in query_feature.keys(): 
+CMC = torch.IntTensor(len(gf_name)).zero_()
+ap = 0.0
+for qk in query_feature.keys():
+    if qk.numpy() == -1:
+        break 
     qv = torch.FloatTensor(query_feature[qk]).view(-1,1).cuda()
     score = torch.mm(gf_tensor,qv)
     score = score.squeeze(1).cpu()
     score = score.numpy()
-    #print(gf_tensor)
-    #print(qv)
-    print(max(score))
+    #print(max(score))
     # predict index
     index = np.argsort(score)  #from small to large
     index = index[::-1]
-    result[qk] = []
-    for i in index:
-        result[qk].append(gf_name[i][0])
-with open("results.json", "w") as f:
-        json.dump(result, f, indent=4)
+    # good index
+    ap_tmp, CMC_tmp = compute_mAP(index, good_index = qk, junk_index=None)
+    CMC = CMC + CMC_tmp
+    ap += ap_tmp
+
+CMC = CMC.float()
+CMC = CMC/(len(query_feature.keys()) -1 )#average CMC
+print('T2V Rank@1:%f Rank@5:%f Rank@10:%f mAP:%f'%(CMC[0],CMC[4],CMC[9],ap/(len(query_feature.keys())-1)))
