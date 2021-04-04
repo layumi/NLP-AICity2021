@@ -86,7 +86,7 @@ class NetVLAD(nn.Module):
         # flattening + L2 norm
         vlad = vlad_.reshape(-1, self.cluster_size * self.feature_size)  # -> B x DK
         vlad = F.normalize(vlad)
-        return vlad, vlad_, save_ass  # B x DK
+        return vlad #, vlad_, save_ass  # B x DK
 
     def sanity_checks(self, x):
         """Catch any nans in the inputs/clusters"""

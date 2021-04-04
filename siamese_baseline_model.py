@@ -8,6 +8,7 @@ import torch.nn.functional as F
 from model import ft_net_SE, ft_net, NetVLAD, weights_init_kaiming
 from transformers import AutoTokenizer, AutoModel
 from DeBERTa import deberta
+from resnet_t2v import tsm_resnet50
 
 class SiameseBaselineModel(torch.nn.Module):
     def __init__(self, model_cfg, init_model=None):
@@ -31,7 +32,14 @@ class SiameseBaselineModel(torch.nn.Module):
         else:
             self.lang_fc = torch.nn.Sequential(*[
                       torch.nn.BatchNorm1d(768*2), 
-                      torch.nn.Linear(768*2, 4096) ]) 
+                      torch.nn.Linear(768*2, 4096) ])
+
+        #if model_cfg.motion:
+        #    self.visual_fc = torch.nn.Sequential(*[
+        #            torch.nn.Conv2d(2048, 768, kernel_size=(1,1)),
+        #            NetVLAD(dim=768),
+        #            torch.nn.Linear(9*768, 4096) ])
+        #else: 
         self.visual_fc = torch.nn.Sequential(*[
                       torch.nn.BatchNorm1d(4096),
                       torch.nn.Linear(4096, 4096) ])
@@ -40,11 +48,7 @@ class SiameseBaselineModel(torch.nn.Module):
 
         self.motion = model_cfg.motion
         if model_cfg.motion:
-            self.resnet50_m = ft_net( class_num = 2498, droprate=0.2, stride=1, pool='gem', circle =True, init_model = None, netvlad = model_cfg.netvlad)
-            self.resnet50_m.classifier = torch.nn.Sequential() #remove classifier
-            self.car_fc = torch.nn.Linear(512, 512)
-            self.bg_fc = torch.nn.Linear(512, 512)
-            self.combine_v = torch.nn.Linear(1024, 512)
+            self.resnet50_m = tsm_resnet50(pretrained= True, num_segments = 4)
         if model_cfg.deberta:
             self.bert_model = deberta.DeBERTa(pre_trained='base') 
             self.bert_model.apply_state()
@@ -74,9 +78,15 @@ class SiameseBaselineModel(torch.nn.Module):
             l1 = torch.mean(outputs.last_hidden_state, dim=1)
             l2, _ = torch.max(outputs.last_hidden_state, dim=1)
             lang_embeds = torch.cat((l1,l2), dim=1)
+
         x1 = self.resnet50.model.avg_pool2(visual_embeds)
         x2 = self.resnet50.model.max_pool2(visual_embeds)
         visual_embeds = torch.cat((x1,x2), dim = 1) #4096
+        if self.motion:
+            motion = motion.view(-1, 3, self.model_cfg.CROP_SIZE, self.model_cfg.CROP_SIZE)
+            motion_embeds = self.resnet50_m(motion) # 3028, 512
+            visual_embeds = visual_embeds + motion_embeds  #40), dim = 1) #4096
+            predict_class_m, _ = self.resnet50.classifier(motion_embeds)
 
         lang_embeds = self.lang_fc(lang_embeds) # learned
         visual_embeds = self.visual_fc(visual_embeds) # learned
@@ -86,11 +96,8 @@ class SiameseBaselineModel(torch.nn.Module):
         predict_class_v, visual_embeds = self.resnet50.classifier(visual_embeds) # learned
 
         if self.motion:
-            predict_class_m, motion_embeds = self.resnet50_m(crops) # 3028, 512
-        #print(visual_embeds.shape)
-        #print(lang_embeds.shape)
-        #d = F.pairwise_distance(visual_embeds, lang_embeds)
-        #similarity = torch.exp(-d)
+            return visual_embeds, lang_embeds, predict_class_v, predict_class_l, predict_class_m
+            
         return visual_embeds, lang_embeds, predict_class_v, predict_class_l
 
     def compute_lang_embed(self, input_ids, attention_mask):

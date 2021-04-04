@@ -160,7 +160,7 @@ def l2_norm(v):
 xhloss = ContrastiveLoss()
 def compute_loss(model, input_ids, attention_mask, crop, motion, nl_id, crop_id, label, warm):
     if opt.motion:
-        visual_embeds, lang_embeds, predict_class_v, predict_class_l = model.forward(input_ids, attention_mask, crop, motion.cuda())
+        visual_embeds, lang_embeds, predict_class_v, predict_class_l, predict_class_motion = model.forward(input_ids, attention_mask, crop, motion.cuda())
     else:
         visual_embeds, lang_embeds, predict_class_v, predict_class_l = model.forward(input_ids, attention_mask, crop)
     #print(similarity.shape, predict_class_v.shape, predict_class_l.shape)
@@ -185,9 +185,13 @@ def compute_loss(model, input_ids, attention_mask, crop, motion, nl_id, crop_id,
         loss_xh  = 0
     loss_cv =  F.cross_entropy(predict_class_v, crop_id.cuda(), ignore_index = -1)
     loss_nl =  F.cross_entropy(predict_class_l, nl_id.cuda(), ignore_index = -1)
-  
-    loss_total = loss_con/2 + loss_cv + loss_nl + loss_xh
-    print('\r\rtotal:%.4f  loss_con:%.4f loss_cv:%.4f loss_nl:%.4f loss_xh:%.4f  warmup:%.4f'%(loss_total, loss_con, loss_cv, loss_nl, loss_xh, warm), end="" )
+
+    if opt.motion:  
+        loss_mt =  F.cross_entropy(predict_class_motion, crop_id.cuda(), ignore_index = -1)
+    else:
+        loss_mt = 0.0
+    loss_total = loss_con/2 + loss_cv + loss_nl + loss_mt + loss_xh
+    print('\r\rtotal:%.4f  loss_con:%.4f loss_cv:%.4f loss_nl:%.4f loss_mt:%.4f loss_xh:%.4f  warmup:%.4f'%(loss_total, loss_con, loss_cv, loss_nl, loss_mt, loss_xh, warm), end="" )
     return loss_total
 
 

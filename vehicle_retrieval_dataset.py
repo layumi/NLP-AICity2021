@@ -83,11 +83,25 @@ class CityFlowNLDataset(Dataset):
         #else:
         #    label = 0 #negative
         track = self.list_of_tracks[index]
-        frame_idx = int(random.uniform(0, len((track["frames"]))))
+        
+        nseg = 4
+        length = len((track["frames"])) // nseg
+        nmotion = torch.zeros((nseg, 3, self.data_cfg.CROP_SIZE, self.data_cfg.CROP_SIZE))
+        if self.motion:
+            for i in range(nseg):
+                if i*length <=len(track["frames"]):
+                    frame_idx = int(random.uniform(i*length, min( (i+1)*length, len((track["frames"])))))
+                else: 
+                    frame_idx = len((track["frames"])) -1
+                frame_path = os.path.join(self.data_cfg.CITYFLOW_PATH, track["frames"][frame_idx])
+                frame = Image.open(frame_path).convert('RGB')
+                motion = frame.resize((self.data_cfg.CROP_SIZE, self.data_cfg.CROP_SIZE) , Image.BICUBIC)
+                motion = self.transform(motion)
+                nmotion[i,:,:,:] = motion
+        frame_idx = int(random.uniform(0, len(track["frames"])))
         frame_path = os.path.join(self.data_cfg.CITYFLOW_PATH, track["frames"][frame_idx])
         if not os.path.isfile(frame_path):
             self._logger.warning("Missing Image File: %s" % track["frames"][frame_idx])
-            label = 0
             crop = torch.randn(size=(3,) + self.data_cfg.CROP_SIZE)
         else:
             frame = Image.open(frame_path).convert('RGB')
@@ -101,13 +115,6 @@ class CityFlowNLDataset(Dataset):
             crop_id = track["track_id"]
             crop = frame.crop( ( x1, y1, x2, y2 ) )
             frame.close() # clean
-            if self.motion:
-                motion = Image.open('motions/%04d.jpg'%index).convert('RGB')
-                motion = motion.resize((motion.size[0]*4, motion.size[1]*4) , Image.BICUBIC) #restore
-                motion[:, x1:x2, y1:y2] = 0
-                motion[:, x1+pad:x2-pad, y1+pad:y2-pad] =crop[:, pad:-pad, pad:-pad]
-                motion = motion.resize((self.data_cfg.CROP_SIZE, self.data_cfg.CROP_SIZE) , Image.BICUBIC)
-                motion = self.transform(motion)
             crop = crop.resize((self.data_cfg.CROP_SIZE, self.data_cfg.CROP_SIZE) , Image.BICUBIC)
             crop = self.transform(crop)
             #crop = torch.from_numpy(crop).permute([2, 0, 1]).to(
@@ -118,7 +125,7 @@ class CityFlowNLDataset(Dataset):
         nl = '[CLS]' + nl.replace('Sedan', 'sedan').replace('suv','SUV').replace('Suv','SUV').replace('Jeep','jeep').replace('  ',' ') + '[SEP]'
         #label = torch.Tensor([label]).to(dtype=torch.float32) # only 0,1
         if self.motion:
-            return nl, crop, motion, nl_id, crop_id, label
+            return nl, crop, nmotion, nl_id, crop_id, label
         return nl, crop, nl_id, crop_id, label
 
 class CityFlowNLInferenceDataset(Dataset):
