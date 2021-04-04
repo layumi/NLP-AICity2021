@@ -127,14 +127,8 @@ def extract_feature_v(model, dataloaders):
     features = {}
     motion_features = {}
     count = 0
-    model.resnet50 =  torch.nn.DataParallel(model.resnet50)
     for data, gallery_id in tqdm(dataloaders): # return one track
         frame_data = data[0]
-        #print(frame_data.shape)
-        if model.motion:
-            frame_data = frame_data[0]
-            motion_data = data[1]
-            _, motion_embeds = model.resnet50_m(motion_data.cuda())
         n, c, h, w = frame_data.size()
         #print(frame_data.size(), gallery_id)
         for j in range(0, n, opt.batchsize):
@@ -147,8 +141,7 @@ def extract_feature_v(model, dataloaders):
             for scale in ms:
                 if scale != 1:
                     input_img = nn.functional.interpolate(input_img, scale_factor=scale, mode='bilinear', align_corners=False)
-                _, visual_embeds = model.resnet50(input_img)
-                outputs = model.car_fc(visual_embeds) + model.bg_fc(motion_embeds)
+                outputs = model.compute_visual_embed(input_img)
                 fnorm = torch.norm(outputs, p=2, dim=1, keepdim=True)
                 outputs = outputs.div(fnorm.expand_as(outputs))
                 ff += torch.sum(outputs, dim=0)

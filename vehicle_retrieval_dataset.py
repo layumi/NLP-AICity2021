@@ -146,7 +146,6 @@ class CityFlowNLInferenceDataset(Dataset):
 
     def read_img(self, data):
         frame_idx, frame_path, frame_box = data
-        frame_path = os.path.join(self.data_cfg.CITYFLOW_PATH, frame_path)
         if not os.path.isfile(frame_path):
             print('missing %s'%frame_path)
         frame = Image.open(frame_path).convert('RGB')
@@ -157,21 +156,16 @@ class CityFlowNLInferenceDataset(Dataset):
         crop = frame.crop( (max(0, box[0]-pad), max(0, box[1]-pad), 
                min(box[0] + box[2]+pad, w-1), min(box[1] + box[3]+pad, h-1)))
         frame.close()
-        motion = Image.open('motions/%04d.jpg'%index).convert('RGB')
-        motion = motion.resize((motion.size[0]*4, motion.size[1]*4) , Image.BICUBIC) #restore
-        motion[:, x1:x2, y1:y2] = 0
-        motion[:, x1+pad:x2-pad, y1+pad:y2-pad] =crop[:, pad:-pad, pad:-pad]
-        motion = motion.resize((self.data_cfg.CROP_SIZE, self.data_cfg.CROP_SIZE) , Image.BICUBIC)
         crop = crop.resize((self.data_cfg.CROP_SIZE, self.data_cfg.CROP_SIZE) , Image.BICUBIC)
         if frame_idx == 0:
             save_path = './crops/%s.jpg'%self.one_id
             crop.save(save_path)
-            save_path_motion = './crops/%s_m.jpg'%self.one_id
-            motion.save(save_path)
+            #save_path_motion = './crops/%s_m.jpg'%self.one_id
+            #motion.save(save_path)
         crop = self.transform(crop)
         self.cropped_frames[frame_idx,:,:,:] = crop
-        motion = self.transform(motion)
-        self.cropped_motions[frame_idx,:,:,:] = motion
+        #motion = self.transform(motion)
+        #self.cropped_motions[frame_idx,:,:,:] = motion
         return
 
 
@@ -186,21 +180,59 @@ class CityFlowNLInferenceDataset(Dataset):
         dp = {"id": self.list_of_uuids[index]}
         self.one_id = self.list_of_uuids[index]
         dp.update(self.list_of_tracks[index])
-        self.cropped_frames = torch.zeros( [len(dp["frames"]), 3, self.data_cfg.CROP_SIZE, self.data_cfg.CROP_SIZE])
-        self.cropped_motions = torch.zeros( [len(dp["frames"]), 3, self.data_cfg.CROP_SIZE, self.data_cfg.CROP_SIZE])
+        nseg = 4
+        track = dp
+        length = len((track["frames"])) // nseg
+        nmotion = torch.zeros((nseg, 3, self.data_cfg.CROP_SIZE, self.data_cfg.CROP_SIZE))
+        if self.motion:
+            if len(track["frames"]) > nseg:
+                for i in range(nseg):
+                    if i*length <=len(track["frames"]):
+                        frame_idx = round( (i*length+min( (i+1)*length, len((track["frames"]))))/2 )
+                        frame_idx = min(frame_idx, len((track["frames"])) -1 )
+                    else:
+                        frame_idx = len((track["frames"])) -1
+                    frame_path = os.path.join(self.data_cfg.CITYFLOW_PATH, track["frames"][frame_idx])
+                    frame = Image.open(frame_path).convert('RGB')
+                    motion = frame.resize((self.data_cfg.CROP_SIZE, self.data_cfg.CROP_SIZE) , Image.BICUBIC)
+                    motion = self.transform(motion)
+                    nmotion[i,:,:,:] = motion
+            else:
+                for i in range(len(track["frames"])):
+                    frame_path = os.path.join(self.data_cfg.CITYFLOW_PATH, track["frames"][i])
+                    frame = Image.open(frame_path).convert('RGB')
+                    motion = frame.resize((self.data_cfg.CROP_SIZE, self.data_cfg.CROP_SIZE) , Image.BICUBIC)
+                    motion = self.transform(motion)
+                    nmotion[i,:,:,:] = motion
+
+        self.cropped_frames = torch.zeros((nseg, 3, self.data_cfg.CROP_SIZE, self.data_cfg.CROP_SIZE))
         frame_idx_iter, frame_path_iter, frame_box_iter = [],[],[]
-        for frame_idx, frame_path in enumerate(dp["frames"]):
-            frame_idx_iter.append(frame_idx)
-            frame_path_iter.append(frame_path)
-            frame_box_iter.append(dp["boxes"][frame_idx])
-        if len(dp["frames"])<80:
+        if len(track["frames"]) > nseg:
+            for i in range(nseg):
+                if i*length <=len(track["frames"]):
+                    frame_idx = round( (i*length + min( (i+1)*length, len((track["frames"]))))/2 )
+                    frame_idx = min(frame_idx, len((track["frames"])) -1 )
+                else:
+                    frame_idx = len((track["frames"])) -1
+                frame_path = os.path.join(self.data_cfg.CITYFLOW_PATH, track["frames"][frame_idx])
+                frame_idx_iter.append(i)
+                frame_path_iter.append(frame_path)
+                frame_box_iter.append(dp["boxes"][frame_idx])
+        else:
+            for i in range(len(track["frames"])):
+                frame_path = os.path.join(self.data_cfg.CITYFLOW_PATH, track["frames"][i])
+                frame_idx_iter.append(i)
+                frame_path_iter.append(frame_path)
+                frame_box_iter.append(dp["boxes"][i])
+
+        if nseg<80:
             for data in zip(frame_idx_iter, frame_path_iter, frame_box_iter):
                 self.read_img(data)
         else:
             with Pool(4) as p:
                 p.map(self.read_img, zip(frame_idx_iter, frame_path_iter, frame_box_iter) )
         crops = self.cropped_frames
-        motions = self.cropped_motions
+        #motions = self.cropped_motions
         if self.motion:
-            return [crops, motion], self.list_of_uuids[index]
+            return [crops, nmotion], self.list_of_uuids[index]
         return crops, self.list_of_uuids[index]
