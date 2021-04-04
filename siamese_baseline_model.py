@@ -101,17 +101,18 @@ class SiameseBaselineModel(torch.nn.Module):
         return visual_embeds, lang_embeds, predict_class_v, predict_class_l
 
     def compute_visual_embed(self, crops, motion=None):
-        visual_embeds = self.resnet50.model.features(crops)
-        x1 = self.resnet50.model.avg_pool2(visual_embeds)
-        x2 = self.resnet50.model.max_pool2(visual_embeds)
-        visual_embeds = torch.cat((x1,x2), dim = 1) #4096
-        if self.motion:
-            motion = motion.view(-1, 3, self.model_cfg.CROP_SIZE, self.model_cfg.CROP_SIZE)
-            motion_embeds = self.resnet50_m(motion) # 3028, 512
-            visual_embeds = visual_embeds + motion_embeds  #40), dim = 1) #4096
+        with torch.no_grad():
+            visual_embeds = self.resnet50.model.features(crops)
+            x1 = self.resnet50.model.avg_pool2(visual_embeds)
+            x2 = self.resnet50.model.max_pool2(visual_embeds)
+            visual_embeds = torch.cat((x1,x2), dim = 1) #4096
+            if self.motion:
+                motion = motion.view(-1, 3, self.model_cfg.CROP_SIZE, self.model_cfg.CROP_SIZE)
+                motion_embeds = self.resnet50_m(motion) # 3028, 512
+                visual_embeds = visual_embeds + motion_embeds  #40), dim = 1) #4096
 
-        visual_embeds = self.visual_fc(visual_embeds) # learned
-        _, visual_embeds = self.resnet50.classifier(visual_embeds) # learned
+            visual_embeds = self.visual_fc(visual_embeds) # learned
+            _, visual_embeds = self.resnet50.classifier(visual_embeds) # learned
         return visual_embeds        
 
     def compute_lang_embed(self, input_ids, attention_mask):
@@ -122,7 +123,6 @@ class SiameseBaselineModel(torch.nn.Module):
                 outputs = self.bert_model(input_ids, attention_mask = attention_mask)
             if self.netvlad:
                 lang_embeds = outputs.last_hidden_state
-                lang_embeds = lang_embeds.transpose(1,2).contiguous().unsqueeze(-1)
             else:
                 l1 = torch.mean(outputs.last_hidden_state, dim=1)
                 l2, _ = torch.max(outputs.last_hidden_state, dim=1)
