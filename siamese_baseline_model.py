@@ -14,6 +14,7 @@ class SiameseBaselineModel(torch.nn.Module):
     def __init__(self, model_cfg, init_model=None):
         super().__init__()
         self.model_cfg = model_cfg
+        self.nseg = model_cfg
         self.netvlad = model_cfg.netvlad
         self.resnet50 = ft_net_SE( class_num = 2498, droprate=0.2, stride=1, pool='gem', circle =True, init_model = init_model, netvlad = False)
         #self.bert_tokenizer = AutoTokenizer.from_pretrained("roberta-base")
@@ -68,7 +69,7 @@ class SiameseBaselineModel(torch.nn.Module):
                 outputs = self.bert_model(input_ids)[-1]
             else:
                 outputs = self.bert_model(input_ids, attention_mask = attention_mask)
-            visual_embeds = self.resnet50.model.features(crops) # N, 2048, h,w 
+            visual_embeds = self.resnet50.model.features(crops) # N*nseg, 2048, h,w 
 
         # embedding
         if self.netvlad:
@@ -81,7 +82,11 @@ class SiameseBaselineModel(torch.nn.Module):
 
         x1 = self.resnet50.model.avg_pool2(visual_embeds)
         x2 = self.resnet50.model.max_pool2(visual_embeds)
-        visual_embeds = torch.cat((x1,x2), dim = 1) #4096
+        visual_embeds = torch.cat((x1,x2), dim = 1) ## N*nseg, 4096
+        ### nseg -> 1
+        visual_embeds = visual_embeds.view(-1, self.nseg, visual_embeds.size(-1))
+        visual_embeds = torch.mean(visual_embeds, dim=1)
+
         if self.motion:
             motion = motion.view(-1, 3, self.model_cfg.CROP_SIZE, self.model_cfg.CROP_SIZE)
             motion_embeds = self.resnet50_m(motion) # 3028, 512
