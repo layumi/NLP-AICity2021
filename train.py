@@ -56,7 +56,7 @@ parser.add_argument('--adam', action='store_true', help='use all training data' 
 parser.add_argument('--name',default='ft_ResNet50', type=str, help='output model name')
 parser.add_argument('--init_name',default='imagenet', type=str, help='initial with ImageNet')
 parser.add_argument('--CITYFLOW_PATH',default="data/cityflow/MTMC",type=str, help='training dir path')
-parser.add_argument('--JSON_PATH',default="data/train-tracks.json",type=str, help='training dir path')
+parser.add_argument('--JSON_PATH',default="data/train-tracks-clear.json",type=str, help='training dir path')
 parser.add_argument('--EVAL_TRACKS_JSON_PATH',default="data/test-tracks.json",type=str, help='training dir path')
 parser.add_argument('--CROP_SIZE', default=256, type=int, help='batchsize')
 parser.add_argument('--POSITIVE_THRESHOLD', default=0.5, type=float, help='batchsize')

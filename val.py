@@ -118,6 +118,7 @@ def compute_mAP(index, good_index, junk_index):
     rows_good = rows_good.flatten()
     
     cmc[rows_good[0]:] = 1
+    rr = 1/(1+rows_good[0])
     for i in range(ngood):
         d_recall = 1.0/ngood
         precision = (i+1)*1.0/(rows_good[i]+1)
@@ -126,8 +127,8 @@ def compute_mAP(index, good_index, junk_index):
         else:
             old_precision=1.0
         ap = ap + d_recall*(old_precision + precision)/2
-
-    return ap, cmc
+    
+    return ap, cmc, rr
 
 def extract_feature_l(model,dataloaders):
     features = {}
@@ -271,6 +272,7 @@ gf_tensor = gf_tensor.div(fnorm.expand_as(gf_tensor))
 
 CMC = torch.IntTensor(len(gf_name)).zero_()
 ap = 0.0
+rr = 0.0
 for qk in query_feature.keys():
     if qk.numpy() == -1:
         break 
@@ -283,10 +285,12 @@ for qk in query_feature.keys():
     index = np.argsort(score)  #from small to large
     index = index[::-1]
     # good index
-    ap_tmp, CMC_tmp = compute_mAP(index, good_index = qk, junk_index=None)
+    ap_tmp, CMC_tmp, rr_tmp = compute_mAP(index, good_index = qk, junk_index=None)
     CMC = CMC + CMC_tmp
     ap += ap_tmp
+    rr += rr_tmp
 
 CMC = CMC.float()
 CMC = CMC/(len(query_feature.keys()) -1 )#average CMC
 print('T2V Rank@1:%f Rank@5:%f Rank@10:%f mAP:%f'%(CMC[0],CMC[4],CMC[9],ap/(len(query_feature.keys())-1)))
+print('mRR:%f'%(rr/(len(query_feature.keys())-1)))

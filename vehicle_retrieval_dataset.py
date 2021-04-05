@@ -61,8 +61,8 @@ class CityFlowNLDataset(Dataset):
         count = 0
         # add id and nl, -1 for unlabeled data
         for track_idx, track in enumerate(self.list_of_tracks):
-            track["track_id"] = track_idx
-            track["nl_id"] = track_idx
+            track["track_id"] = track["id"] # Using clear trainning json Or if you want to test old json, using track_idx
+            track["nl_id"] = track["id"]
             # from 0 to train_num-1 is the id of the original training set. 
             if track_idx>=train_num:
                 track["nl_id"] = -1
@@ -144,6 +144,13 @@ class CityFlowNLInferenceDataset(Dataset):
     def __len__(self):
         return len(self.list_of_uuids)
 
+    def get_concat_h_cut(self, im1, im2):
+        dst = Image.new('RGB', (im1.width + im2.width, min(im1.height, im2.height)))
+        dst.paste(im1, (0, 0))
+        dst.paste(im2, (im1.width, 0))
+        return dst
+
+
     def read_img(self, data):
         frame_idx, frame_path, frame_box = data
         if not os.path.isfile(frame_path):
@@ -155,13 +162,15 @@ class CityFlowNLInferenceDataset(Dataset):
         pad = 5
         crop = frame.crop( (max(0, box[0]-pad), max(0, box[1]-pad), 
                min(box[0] + box[2]+pad, w-1), min(box[1] + box[3]+pad, h-1)))
-        frame.close()
         crop = crop.resize((self.data_cfg.CROP_SIZE, self.data_cfg.CROP_SIZE) , Image.BICUBIC)
-        if frame_idx == 0:
-            save_path = './crops/%s.jpg'%self.one_id
-            crop.save(save_path)
-            #save_path_motion = './crops/%s_m.jpg'%self.one_id
-            #motion.save(save_path)
+        #if frame_idx == 0:
+        save_path = './crops/%s.jpg'%self.one_id
+        if not os.path.isfile(save_path):
+            frame_save = frame.resize((self.data_cfg.CROP_SIZE, self.data_cfg.CROP_SIZE) , Image.BICUBIC)
+            save_path_motion = './crops/%s.jpg'%self.one_id
+            frame_save = self.get_concat_h_cut(crop, frame_save)
+            frame_save.save(save_path)
+        frame.close()
         crop = self.transform(crop)
         self.cropped_frames[frame_idx,:,:,:] = crop
         #motion = self.transform(motion)

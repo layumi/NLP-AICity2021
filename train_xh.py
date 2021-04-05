@@ -169,7 +169,7 @@ def compute_loss(model, input_ids, attention_mask, crop, motion, nl_id, crop_id,
 
     visual_embeds = l2_norm(visual_embeds)    
     lang_embeds = l2_norm(lang_embeds)    
-    loss_xh = xhloss(torch.mm(visual_embeds, torch.t(lang_embeds))) *opt.batchsize
+    loss_xh = xhloss(torch.mm(visual_embeds, torch.t(lang_embeds))) #*opt.batchsize
     # dense triplet loss
     #sim1 = torch.mm(visual_embeds*torch.exp(model.module.logit_scale1), torch.t(lang_embeds)) 
     #sim2 = sim1.t()
