@@ -14,7 +14,7 @@ class SiameseBaselineModel(torch.nn.Module):
     def __init__(self, model_cfg, init_model=None):
         super().__init__()
         self.model_cfg = model_cfg
-        self.nseg = model_cfg
+        self.nseg = model_cfg.nseg
         self.netvlad = model_cfg.netvlad
         self.resnet50 = ft_net_SE( class_num = 2498, droprate=0.2, stride=1, pool='gem', circle =True, init_model = init_model, netvlad = False)
         #self.bert_tokenizer = AutoTokenizer.from_pretrained("roberta-base")
@@ -84,7 +84,7 @@ class SiameseBaselineModel(torch.nn.Module):
         x2 = self.resnet50.model.max_pool2(visual_embeds)
         visual_embeds = torch.cat((x1,x2), dim = 1) ## N*nseg, 4096
         ### nseg -> 1
-        visual_embeds = visual_embeds.view(-1, self.nseg, visual_embeds.size(-1))
+        visual_embeds = visual_embeds.view(-1, self.nseg, 4096) # N, nseg, 4096
         visual_embeds = torch.mean(visual_embeds, dim=1)
 
         if self.motion:

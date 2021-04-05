@@ -94,8 +94,8 @@ class CityFlowNLDataset(Dataset):
                 frame_idx = int(random.uniform(i*length, min( (i+1)*length, len((track["frames"])))))
             else: 
                 frame_idx = len((track["frames"])) -1
-                frame_path = os.path.join(self.data_cfg.CITYFLOW_PATH, track["frames"][frame_idx])
-                frame = Image.open(frame_path).convert('RGB')
+            frame_path = os.path.join(self.data_cfg.CITYFLOW_PATH, track["frames"][frame_idx])
+            frame = Image.open(frame_path).convert('RGB')
             if self.motion:
                 motion = frame.resize((self.data_cfg.CROP_SIZE, self.data_cfg.CROP_SIZE) , Image.BICUBIC)
                 motion = self.transform(motion)
@@ -119,7 +119,7 @@ class CityFlowNLDataset(Dataset):
             frame.close() # clean
             crop = crop.resize((self.data_cfg.CROP_SIZE, self.data_cfg.CROP_SIZE) , Image.BICUBIC)
             crop = self.transform(crop)
-            ncrops[i,:,:,:] = motion
+            ncrops[i,:,:,:] = crop
             #crop = torch.from_numpy(crop).permute([2, 0, 1]).to(
             #    dtype=torch.float32)
         nl_id = track["nl_id"]
