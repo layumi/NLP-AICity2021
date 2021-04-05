@@ -9,6 +9,7 @@ from model import ft_net_SE, ft_net, NetVLAD, weights_init_kaiming
 from transformers import AutoTokenizer, AutoModel
 from DeBERTa import deberta
 from resnet_t2v import tsm_resnet50
+from model import GeM
 
 class SiameseBaselineModel(torch.nn.Module):
     def __init__(self, model_cfg, init_model=None):
@@ -18,6 +19,7 @@ class SiameseBaselineModel(torch.nn.Module):
         self.netvlad = model_cfg.netvlad
         self.resnet50 = ft_net_SE( class_num = 2498, droprate=0.2, stride=1, pool='gem', circle =True, init_model = init_model, netvlad = False)
         #self.bert_tokenizer = AutoTokenizer.from_pretrained("roberta-base")
+        self.gem = GeM(dim =4096)
         self.bert_model = AutoModel.from_pretrained("roberta-base")
         self.logit_scale1 = torch.nn.Parameter(torch.ones(()), requires_grad=True)
         self.logit_scale2 = torch.nn.Parameter(torch.ones(()), requires_grad=True)
@@ -84,8 +86,8 @@ class SiameseBaselineModel(torch.nn.Module):
         x2 = self.resnet50.model.max_pool2(visual_embeds)
         visual_embeds = torch.cat((x1,x2), dim = 1) ## N*nseg, 4096
         ### nseg -> 1
-        visual_embeds = visual_embeds.view(-1, self.nseg, 4096) # N, nseg, 4096
-        visual_embeds = torch.mean(visual_embeds, dim=1)
+        visual_embeds = visual_embeds.view(-1, self.nseg, 4096).transpose(1,2).unsqueeze(-1)  # N, 4096, nseg, 1 
+        visual_embeds = self.gem(visual_embeds)
 
         if self.motion:
             motion = motion.view(-1, 3, self.model_cfg.CROP_SIZE, self.model_cfg.CROP_SIZE)
