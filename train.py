@@ -160,6 +160,7 @@ def l2_norm(v):
 
 xhloss = ContrastiveLoss()
 def compute_loss(model, input_ids, attention_mask, crop, motion, nl_id, crop_id, label, warm):
+    crop = crop.view(opt.nseg*opt.batchsize,3,opt.CROP_SIZE, opt.CROP_SIZE)
     if opt.motion:
         visual_embeds, lang_embeds, predict_class_v, predict_class_l, predict_class_motion = model.forward(input_ids, attention_mask, crop, motion.cuda())
     else:
