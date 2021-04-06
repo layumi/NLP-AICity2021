@@ -141,6 +141,7 @@ def load_network(name, opt):
         config = yaml.load(stream)
 
     opt.name = config['name']
+    opt.nseg = config['nseg']
     opt.CROP_SIZE = config['CROP_SIZE']
     opt.CITYFLOW_PATH = config['CITYFLOW_PATH']
     opt.JSON_PATH = config['JSON_PATH']

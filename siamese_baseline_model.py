@@ -19,7 +19,8 @@ class SiameseBaselineModel(torch.nn.Module):
         self.netvlad = model_cfg.netvlad
         self.resnet50 = ft_net_SE( class_num = 2498, droprate=0.2, stride=1, pool='gem', circle =True, init_model = init_model, netvlad = False)
         #self.bert_tokenizer = AutoTokenizer.from_pretrained("roberta-base")
-        self.gem = GeM(dim =4096)
+        if self.nseg>1:
+            self.gem = GeM(dim =4096)
         self.bert_model = AutoModel.from_pretrained("roberta-base")
         self.logit_scale1 = torch.nn.Parameter(torch.ones(()), requires_grad=True)
         self.logit_scale2 = torch.nn.Parameter(torch.ones(()), requires_grad=True)
@@ -86,8 +87,9 @@ class SiameseBaselineModel(torch.nn.Module):
         x2 = self.resnet50.model.max_pool2(visual_embeds)
         visual_embeds = torch.cat((x1,x2), dim = 1) ## N*nseg, 4096
         ### nseg -> 1
-        visual_embeds = visual_embeds.view(-1, self.nseg, 4096).transpose(1,2).unsqueeze(-1)  # N, 4096, nseg, 1 
-        visual_embeds = self.gem(visual_embeds)
+        if self.nseg>1:
+            visual_embeds = visual_embeds.view(-1, self.nseg, 4096).transpose(1,2).unsqueeze(-1)  # N, 4096, nseg, 1 
+            visual_embeds = self.gem(visual_embeds)
 
         if self.motion:
             motion = motion.view(-1, 3, self.model_cfg.CROP_SIZE, self.model_cfg.CROP_SIZE)

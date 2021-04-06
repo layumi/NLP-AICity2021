@@ -176,8 +176,18 @@ def compute_loss(model, input_ids, attention_mask, crop, motion, nl_id, crop_id,
     if opt.ddloss:
         visual_embeds = visual_embeds.t()
         lang_embeds =lang_embeds.t()
-    # dense triplet loss
-    sim1 = torch.mm(visual_embeds*torch.exp(model.module.logit_scale1), torch.t(lang_embeds)) 
+        # dense triplet loss
+        sim1 = torch.mm(visual_embeds*torch.exp(model.module.logit_scale1), torch.t(lang_embeds)) 
+    else: 
+        mask  = torch.ones((opt.batchsize, opt.batchsize))
+        for i in range(opt.batchsize):
+            for j in range(opt.batchsize):
+                if i!=j and crop_id[i] == crop_id[j]:
+                    mask[i,j] = 0.
+                    mask[j,i] = 0.
+                    #print(mask)
+        sim1 = torch.mm(visual_embeds*torch.exp(model.module.logit_scale1), torch.t(lang_embeds)) 
+        sim1 = sim1 * mask.cuda()
     sim2 = sim1.t()
     sim_label = torch.arange(sim1.size(0)).cuda().detach()
     sim_label[np.argwhere(nl_id==-1)] = -1 
