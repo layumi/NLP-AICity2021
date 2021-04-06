@@ -22,6 +22,8 @@ class SiameseBaselineModel(torch.nn.Module):
         if self.nseg>1:
             self.gem = GeM(dim =4096)
         self.bert_model = AutoModel.from_pretrained("roberta-base")
+        # remove pooler to save memory
+        self.bert_model.pooler = torch.nn.Sequential()
         self.logit_scale1 = torch.nn.Parameter(torch.ones(()), requires_grad=True)
         self.logit_scale2 = torch.nn.Parameter(torch.ones(()), requires_grad=True)
         #self.lang_fc = torch.nn.Linear(768, 1024)
