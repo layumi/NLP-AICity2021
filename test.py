@@ -118,6 +118,7 @@ def extract_feature_l(model,dataloaders):
         lang_embeds = lang_embeds.div(fnorm.expand_as(lang_embeds))
 
         ff = torch.sum(lang_embeds, dim =0)
+        #print(ff.shape)
         fnorm = torch.norm(ff, p=2, dim=0, keepdim=True)
         ff = ff.div(fnorm.expand_as(ff))
         features[query_id] = torch.squeeze(ff).cpu().numpy()
@@ -161,7 +162,8 @@ def extract_feature_v(model, dataloaders):
     # Normalize
     for gallery_id in features:
         ff = features[gallery_id]
-        fnorm = torch.norm(ff, p=2, dim=0, keepdim=True)
+        #print(ff.shape)
+        fnorm = torch.norm(ff, p=2, dim=1, keepdim=True)
         ff = ff.div(fnorm.expand_as(ff))
         features[gallery_id] = torch.squeeze(ff).cpu().numpy()
     return features
@@ -234,7 +236,7 @@ for k,v in gallery_feature.items():
     gf_name.append(k)
     count +=1
 
-#print(gf_tensor)
+print(gf_tensor)
 gf_tensor = torch.FloatTensor(gf_tensor).cuda() # 530, 512
 fnorm = torch.norm(gf_tensor, p=2, dim=1, keepdim=True) # 530
 #print(fnorm)

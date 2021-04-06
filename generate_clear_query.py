@@ -19,7 +19,7 @@ for q_id in queries:
 
 for q_id in queries:
     nl3 = queries[q_id]
-    new_nl = []
+    new_nl = nl3.copy()
     for nl in nl3:
         k = nl.lower()
         if not k in trash:
