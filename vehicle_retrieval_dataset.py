@@ -195,8 +195,8 @@ class CityFlowNLInferenceDataset(Dataset):
         nseg = 4
         track = dp
         length = len((track["frames"])) // nseg
-        nmotion = torch.zeros((nseg, 3, self.data_cfg.CROP_SIZE, self.data_cfg.CROP_SIZE))
-        self.cropped_frames = torch.zeros((nseg, 3, self.data_cfg.CROP_SIZE, self.data_cfg.CROP_SIZE))
+        nmotion = torch.zeros((min(nseg, length), 3, self.data_cfg.CROP_SIZE, self.data_cfg.CROP_SIZE))
+        self.cropped_frames = torch.zeros((min(nseg, length), 3, self.data_cfg.CROP_SIZE, self.data_cfg.CROP_SIZE))
         frame_idx_iter, frame_path_iter, frame_box_iter = [],[],[]
         if len(track["frames"]) > nseg:
             for i in range(nseg):
@@ -338,35 +338,37 @@ class VAL_CityFlowNLDataset(Dataset):
         self.one_id = index
         length = len((track["frames"])) // nseg
 
-        self.cropped_frames = torch.zeros((nseg, 3, self.data_cfg.CROP_SIZE, self.data_cfg.CROP_SIZE))
+        nmotion = torch.zeros((min(nseg,length), 3, self.data_cfg.CROP_SIZE, self.data_cfg.CROP_SIZE))
+        self.cropped_frames = torch.zeros((min(nseg, length), 3, self.data_cfg.CROP_SIZE, self.data_cfg.CROP_SIZE))
         frame_idx_iter, frame_path_iter, frame_box_iter = [],[],[]
-        if not self.nl and  len(track["frames"]) > nseg:
-            for i in range(nseg):
-                if i*length <=len(track["frames"]):
-                    frame_idx = round( (i*length+min( (i+1)*length, len((track["frames"]))))/2 )
-                    frame_idx = min(frame_idx, len((track["frames"])) -1 )
-                else:
-                    frame_idx = len((track["frames"])) -1
-                frame_path = os.path.join(self.data_cfg.CITYFLOW_PATH, track["frames"][frame_idx])
-                if self.motion:
-                    frame = Image.open(frame_path).convert('RGB')
-                    motion = frame.resize((self.data_cfg.CROP_SIZE, self.data_cfg.CROP_SIZE) , Image.BICUBIC)
-                    motion = self.transform(motion)
-                    nmotion[i,:,:,:] = motion
-                frame_idx_iter.append(i)
-                frame_path_iter.append(frame_path)
-                frame_box_iter.append(track["boxes"][frame_idx])
-        else:
-            for i in range(len(track["frames"])):
-                frame_path = os.path.join(self.data_cfg.CITYFLOW_PATH, track["frames"][i])
-                if self.motion:
-                    frame = Image.open(frame_path).convert('RGB')
-                    motion = frame.resize((self.data_cfg.CROP_SIZE, self.data_cfg.CROP_SIZE) , Image.BICUBIC)
-                    motion = self.transform(motion)
-                    nmotion[i,:,:,:] = motion
-                frame_idx_iter.append(i)
-                frame_path_iter.append(frame_path)
-                frame_box_iter.append(track["boxes"][i])
+        if not self.nl: 
+            if len(track["frames"]) > nseg:
+                for i in range(nseg):
+                    if i*length <=len(track["frames"]):
+                        frame_idx = round( (i*length+min( (i+1)*length, len((track["frames"]))))/2 )
+                        frame_idx = min(frame_idx, len((track["frames"])) -1 )
+                    else:
+                        frame_idx = len((track["frames"])) -1
+                    frame_path = os.path.join(self.data_cfg.CITYFLOW_PATH, track["frames"][frame_idx])
+                    if self.motion:
+                        frame = Image.open(frame_path).convert('RGB')
+                        motion = frame.resize((self.data_cfg.CROP_SIZE, self.data_cfg.CROP_SIZE) , Image.BICUBIC)
+                        motion = self.transform(motion)
+                        nmotion[i,:,:,:] = motion
+                    frame_idx_iter.append(i)
+                    frame_path_iter.append(frame_path)
+                    frame_box_iter.append(track["boxes"][frame_idx])
+            else:
+                for i in range(len(track["frames"])):
+                    frame_path = os.path.join(self.data_cfg.CITYFLOW_PATH, track["frames"][i])
+                    if self.motion:
+                        frame = Image.open(frame_path).convert('RGB')
+                        motion = frame.resize((self.data_cfg.CROP_SIZE, self.data_cfg.CROP_SIZE) , Image.BICUBIC)
+                        motion = self.transform(motion)
+                        nmotion[i,:,:,:] = motion
+                    frame_idx_iter.append(i)
+                    frame_path_iter.append(frame_path)
+                    frame_box_iter.append(track["boxes"][i])
 
         if not self.nl:
             if nseg<80:
