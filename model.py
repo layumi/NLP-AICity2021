@@ -161,12 +161,12 @@ class ClassBlock(nn.Module):
             add_block += [nn.BatchNorm1d(num_bottleneck)]
         if relu:
             add_block += [nn.LeakyReLU(0.1)]
-        if droprate>0:
-            add_block += [nn.Dropout(p=droprate)]
         add_block = nn.Sequential(*add_block)
         add_block.apply(weights_init_kaiming)
 
         classifier = []
+        if droprate>0:
+            classifier += [nn.Dropout(p=droprate)]
         classifier += [nn.Linear(num_bottleneck, class_num)]
         classifier = nn.Sequential(*classifier)
         classifier.apply(weights_init_classifier)

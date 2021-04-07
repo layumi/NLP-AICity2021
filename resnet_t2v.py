@@ -3,6 +3,7 @@ import torch.nn.functional as F
 import torch 
 from tsm_util import tsm
 import torch.utils.model_zoo as model_zoo
+from model import ClassBlock
 #from spatial_correlation_sampler import SpatialCorrelationSampler
 
 __all__ = ['ResNet', 'resnet18', 'resnet34', 'resnet50', 'resnet101']
@@ -210,7 +211,7 @@ class ResNet(nn.Module):
         for i in range(1, blocks):
             remainder =int( i % 3)
             layers.append(block(self.inplanes, planes, num_segments, remainder=remainder))
-            
+        self.classifier = ClassBlock(input_dim = 4096, class_num = 1, droprate = 0) # just for feature
         return nn.Sequential(*layers)            
     
     def forward(self, x, temperature=None):
@@ -230,8 +231,9 @@ class ResNet(nn.Module):
         x_mean = x.mean(dim=1)
         x_max,_ = x.max(dim=1)
                        
-        return torch.cat((x_mean, x_max), dim=1)
-
+        x =  torch.cat((x_mean, x_max), dim=1)
+        feature = self.classifier.add_block(x)
+        return feature
 
 def resnet18(pretrained=False, shift='TSM',num_segments = 8, flow_estimation=0, **kwargs):
     """Constructs a ResNet-18 model.
