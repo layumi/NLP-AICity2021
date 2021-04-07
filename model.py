@@ -164,9 +164,9 @@ class ClassBlock(nn.Module):
         add_block = nn.Sequential(*add_block)
         add_block.apply(weights_init_kaiming)
 
-        classifier = []
         if droprate>0:
-            classifier += [nn.Dropout(p=droprate)]
+            self.drop= nn.Sequential(*[nn.Dropout(p=droprate)])
+        classifier = []
         classifier += [nn.Linear(num_bottleneck, class_num)]
         classifier = nn.Sequential(*classifier)
         classifier.apply(weights_init_classifier)
@@ -177,9 +177,11 @@ class ClassBlock(nn.Module):
         x = self.add_block(x)
         if self.return_f:
             f = x
+            x = self.drop(x)
             x = self.classifier(x)
             return [x,f]
         else:
+            x = self.drop(x)
             x = self.classifier(x)
             return x
 

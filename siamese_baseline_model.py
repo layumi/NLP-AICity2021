@@ -24,8 +24,10 @@ class SiameseBaselineModel(torch.nn.Module):
         self.resnet50 = ft_net_SE( class_num = 2498, droprate=model_cfg.droprate, stride = rstride, pool='gem', circle =True, init_model = init_model, netvlad = False)
         #self.bert_tokenizer = AutoTokenizer.from_pretrained("roberta-base")
         mid_dim = 4096 
-        if self.motion:
-            mid_dim += 512
+        if model_cfg.motion:
+            motion_dim = 512
+        else: 
+            motion_dim = 0
         if self.nseg>1:
             self.gem = GeM(dim =mid_dim)
         self.bert_model = AutoModel.from_pretrained("roberta-base")
@@ -54,8 +56,8 @@ class SiameseBaselineModel(torch.nn.Module):
         #            torch.nn.Linear(9*768, 4096) ])
         #else: 
         self.visual_fc = torch.nn.Sequential(*[
-                      torch.nn.BatchNorm1d(mid_dim),
-                      torch.nn.Linear(mid_dim, mid_dim) ])
+                      torch.nn.BatchNorm1d(mid_dim+motion_dim),
+                      torch.nn.Linear(mid_dim+motion_dim, mid_dim) ])
         self.lang_fc.apply(weights_init_kaiming)
         self.visual_fc.apply(weights_init_kaiming)
 
@@ -103,8 +105,8 @@ class SiameseBaselineModel(torch.nn.Module):
         if self.motion:
             motion = motion.view(-1, 3, self.model_cfg.CROP_SIZE, self.model_cfg.CROP_SIZE)
             motion_embeds = self.resnet50_m(motion) # 3028, 2048
-            visual_embeds = visual_embeds + motion_embeds  #40), dim = 1) #4096
-            predict_class_m, _ = self.resnet50.classifier(motion_embeds)
+            visual_embeds = torch.cat((visual_embeds,motion_embeds), dim=1)  #40), dim = 1) #4096
+            #predict_class_m, _ = self.resnet50.classifier(motion_embeds)
 
         lang_embeds = self.lang_fc(lang_embeds) # learned
         visual_embeds = self.visual_fc(visual_embeds) # learned
@@ -113,8 +115,8 @@ class SiameseBaselineModel(torch.nn.Module):
         predict_class_l, lang_embeds = self.resnet50.classifier(lang_embeds) # learned
         predict_class_v, visual_embeds = self.resnet50.classifier(visual_embeds) # learned
 
-        if self.motion:
-            return visual_embeds, lang_embeds, predict_class_v, predict_class_l, predict_class_m
+        #if self.motion:
+        #    return visual_embeds, lang_embeds, predict_class_v, predict_class_l, predict_class_m
             
         return visual_embeds, lang_embeds, predict_class_v, predict_class_l
 
@@ -127,7 +129,7 @@ class SiameseBaselineModel(torch.nn.Module):
             if self.motion:
                 motion = motion.view(-1, 3, self.model_cfg.CROP_SIZE, self.model_cfg.CROP_SIZE)
                 motion_embeds = self.resnet50_m(motion) # 3028, 512
-                visual_embeds = visual_embeds + motion_embeds  #40), dim = 1) #4096
+                visual_embeds = torch.cat((visual_embeds,motion_embeds), dim=1)  #40), dim = 1) #4096
 
             visual_embeds = self.visual_fc(visual_embeds) # learned
             _, visual_embeds = self.resnet50.classifier(visual_embeds) # learned

@@ -230,23 +230,29 @@ else:
 
 gf_name = []
 gf_tensor = np.ndarray( (len(gallery_feature),512*len(models))) 
+qf_tensor = np.ndarray( (len(query_feature),512*len(models))) 
 count = 0
 for k,v in gallery_feature.items():
     gf_tensor[count,:] = v
     gf_name.append(k)
     count +=1
 
-print(gf_tensor)
+count = 0
+for k,v in query_feature.items():
+    qf_tensor[count,:] = v
+    count +=1
+
+#print(gf_tensor)
 gf_tensor = torch.FloatTensor(gf_tensor).cuda() # 530, 512
+qf_tensor = torch.FloatTensor(qf_tensor).cuda() # 530, 512
 fnorm = torch.norm(gf_tensor, p=2, dim=1, keepdim=True) # 530
-#print(fnorm)
 gf_tensor = gf_tensor.div(fnorm.expand_as(gf_tensor))
 
 result = {}
-for qk in query_feature.keys(): 
-    qv = torch.FloatTensor(query_feature[qk]).view(-1,1).cuda()
-    score = torch.mm(gf_tensor,qv)
-    score = score.squeeze(1).cpu()
+score_total = torch.mm(qf_tensor, gf_tensor.t()).cpu()
+
+for idx,qk in enumerate(query_feature.keys()):
+    score = score_total[idx,:]
     score = score.numpy()
     #print(gf_tensor)
     #print(qv)
@@ -258,4 +264,23 @@ for qk in query_feature.keys():
     for i in index:
         result[qk].append(gf_name[i][0])
 with open("results.json", "w") as f:
+        json.dump(result, f, indent=4)
+
+# hub 
+softmax = torch.nn.Softmax(dim=1)
+score_total = softmax(score_total)
+
+for idx,qk in enumerate(query_feature.keys()): 
+    score = score_total[idx,:]
+    score = score.numpy()
+    #print(gf_tensor)
+    #print(qv)
+    #print(max(score))
+    # predict index
+    index = np.argsort(score)  #from small to large
+    index = index[::-1]
+    result[qk] = []
+    for i in index:
+        result[qk].append(gf_name[i][0])
+with open("results_hub.json", "w") as f:
         json.dump(result, f, indent=4)

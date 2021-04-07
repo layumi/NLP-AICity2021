@@ -196,7 +196,8 @@ class ResNet(nn.Module):
                     nn.init.constant_(m.bn2.weight, 0)
                 elif isinstance(m, Matching_layer):
                     nn.init.constant_(m.bn2.weight, 0)
-        
+
+        self.fc = torch.nn.Sequential() # remove fc        
     def _make_layer(self, block, planes, blocks, num_segments, stride=1):       
         downsample = None        
         if stride != 1 or self.inplanes != planes * block.expansion:
