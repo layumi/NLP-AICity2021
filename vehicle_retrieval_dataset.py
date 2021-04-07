@@ -340,7 +340,7 @@ class VAL_CityFlowNLDataset(Dataset):
 
         self.cropped_frames = torch.zeros((nseg, 3, self.data_cfg.CROP_SIZE, self.data_cfg.CROP_SIZE))
         frame_idx_iter, frame_path_iter, frame_box_iter = [],[],[]
-        ifi not self.nl and  len(track["frames"]) > nseg:
+        if not self.nl and  len(track["frames"]) > nseg:
             for i in range(nseg):
                 if i*length <=len(track["frames"]):
                     frame_idx = round( (i*length+min( (i+1)*length, len((track["frames"]))))/2 )
@@ -355,7 +355,7 @@ class VAL_CityFlowNLDataset(Dataset):
                     nmotion[i,:,:,:] = motion
                 frame_idx_iter.append(i)
                 frame_path_iter.append(frame_path)
-                frame_box_iter.append(dp["boxes"][frame_idx])
+                frame_box_iter.append(track["boxes"][frame_idx])
         else:
             for i in range(len(track["frames"])):
                 frame_path = os.path.join(self.data_cfg.CITYFLOW_PATH, track["frames"][i])
@@ -366,7 +366,7 @@ class VAL_CityFlowNLDataset(Dataset):
                     nmotion[i,:,:,:] = motion
                 frame_idx_iter.append(i)
                 frame_path_iter.append(frame_path)
-                frame_box_iter.append(dp["boxes"][i])
+                frame_box_iter.append(track["boxes"][i])
 
         if not self.nl:
             if nseg<80:
