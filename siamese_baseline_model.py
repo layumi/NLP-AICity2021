@@ -58,7 +58,7 @@ class SiameseBaselineModel(torch.nn.Module):
 
         self.motion = model_cfg.motion
         if model_cfg.motion:
-            self.resnet50_m = tsm_resnet50(pretrained= True, num_segments = 4)
+            self.resnet50_m = tsm_resnet50(pretrained= True, num_segments = model_cfg.nseg)
         if model_cfg.deberta:
             self.bert_model = deberta.DeBERTa(pre_trained='base') 
             self.bert_model.apply_state()
