@@ -195,8 +195,9 @@ class CityFlowNLInferenceDataset(Dataset):
         nseg = 4
         track = dp
         length = len((track["frames"])) // nseg
-        nmotion = torch.zeros((min(nseg, length), 3, self.data_cfg.CROP_SIZE, self.data_cfg.CROP_SIZE))
-        self.cropped_frames = torch.zeros((min(nseg, length), 3, self.data_cfg.CROP_SIZE, self.data_cfg.CROP_SIZE))
+        num = len((track["frames"]))
+        nmotion = torch.zeros((min(nseg, num), 3, self.data_cfg.CROP_SIZE, self.data_cfg.CROP_SIZE))
+        self.cropped_frames = torch.zeros((min(nseg, num), 3, self.data_cfg.CROP_SIZE, self.data_cfg.CROP_SIZE))
         frame_idx_iter, frame_path_iter, frame_box_iter = [],[],[]
         if len(track["frames"]) > nseg:
             for i in range(nseg):
@@ -337,9 +338,9 @@ class VAL_CityFlowNLDataset(Dataset):
         nseg = 4
         self.one_id = index
         length = len((track["frames"])) // nseg
-
-        nmotion = torch.zeros((min(nseg,length), 3, self.data_cfg.CROP_SIZE, self.data_cfg.CROP_SIZE))
-        self.cropped_frames = torch.zeros((min(nseg, length), 3, self.data_cfg.CROP_SIZE, self.data_cfg.CROP_SIZE))
+        num = len((track["frames"]))
+        nmotion = torch.zeros((min(nseg, num), 3, self.data_cfg.CROP_SIZE, self.data_cfg.CROP_SIZE))
+        self.cropped_frames = torch.zeros((min(nseg, num), 3, self.data_cfg.CROP_SIZE, self.data_cfg.CROP_SIZE))
         frame_idx_iter, frame_path_iter, frame_box_iter = [],[],[]
         if not self.nl: 
             if len(track["frames"]) > nseg:
