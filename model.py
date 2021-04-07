@@ -218,6 +218,9 @@ class ft_net(nn.Module):
         if init_model!=None:
             self.flag = True
             self.model = init_model.model
+            if stride == 2:
+                self.model.layer4[0].downsample[0].stride = (2,2)
+                self.model.layer4[0].conv2.stride = (2,2)
             self.pool = init_model.pool
             self.classifier.add_block = init_model.classifier.add_block
             self.classifier.return_f = circle
@@ -488,6 +491,9 @@ class ft_net_SE(nn.Module):
         if init_model!=None:
             self.flag = True
             self.model = init_model.model
+            if stride == 2:
+                self.model.layer4[0].downsample[0].stride = (2,2)
+                self.model.layer4[0].conv2.stride = (2,2)
             self.pool = pool
             if self.pool == 'avg+max':
                 self.model.avg_pool2 = GeM(dim=2048,p=1)

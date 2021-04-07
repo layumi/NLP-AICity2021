@@ -257,5 +257,5 @@ for qk in query_feature.keys():
     result[qk] = []
     for i in index:
         result[qk].append(gf_name[i][0])
-with open("results.json", "w") as f:
+with open("results-clear.json", "w") as f:
         json.dump(result, f, indent=4)

@@ -146,10 +146,10 @@ def extract_feature_l(model,dataloaders):
         fnorm = torch.norm(lang_embeds, p=2, dim=1, keepdim=True)
         lang_embeds = lang_embeds.div(fnorm.expand_as(lang_embeds))
 
-        ff = torch.sum(lang_embeds, dim =0)
-        fnorm = torch.norm(ff, p=2, dim=0, keepdim=True)
-        ff = ff.div(fnorm.expand_as(ff))
-        features[query_id] = torch.squeeze(ff).cpu().numpy()
+        #ff = torch.sum(lang_embeds, dim =0)
+        #fnorm = torch.norm(ff, p=2, dim=0, keepdim=True)
+        #ff = ff.div(fnorm.expand_as(ff))
+        features[query_id] = lang_embeds.cpu().numpy() #torch.squeeze(ff).cpu().numpy()
     return features
 
 def extract_feature_v(model, dataloaders):
@@ -190,7 +190,7 @@ def extract_feature_v(model, dataloaders):
     # Normalize
     for gallery_id in features:
         ff = features[gallery_id]
-        fnorm = torch.norm(ff, p=2, dim=0, keepdim=True)
+        fnorm = torch.norm(ff, p=2, dim=1, keepdim=True)
         ff = ff.div(fnorm.expand_as(ff))
         features[gallery_id] = torch.squeeze(ff).cpu().numpy()
     return features
@@ -207,9 +207,6 @@ for name in names:
 
 bert_tokenizer = AutoTokenizer.from_pretrained("roberta-base")
 
-# Query loader
-with open("data/test-queries.json", "r") as f:
-    queries = json.load(f)
 
 # Gallery loader
 dataset_nl = VAL_CityFlowNLDataset(opt,multi=1, nl=True)
@@ -275,15 +272,18 @@ CMC = torch.IntTensor(len(gf_name)).zero_()
 ap = 0.0
 rr = 0.0
 for qk in query_feature.keys():
+    score_total = torch.FloatTensor((len(gf_name))).zero_()
     if qk.numpy() == -1:
         break 
-    qv = torch.FloatTensor(query_feature[qk]).view(-1,1).cuda()
-    score = torch.mm(gf_tensor,qv)
-    score = score.squeeze(1).cpu()
-    score = score.numpy()
-    #print(max(score))
+    qv = torch.FloatTensor(query_feature[qk])
+    for i in range(qv.shape[0]):
+        qi = qv[i,:].view(-1,1).cuda()
+        score = torch.mm(gf_tensor,qi)
+        score_total += score.squeeze(1).cpu()
+    score_total = score_total.numpy()
+    # print(max(score))
     # predict index
-    index = np.argsort(score)  #from small to large
+    index = np.argsort(score_total)  #from small to large
     index = index[::-1]
     # good index
     ap_tmp, CMC_tmp, rr_tmp = compute_mAP(index, good_index = qk, junk_index=None)

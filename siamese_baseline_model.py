@@ -17,7 +17,11 @@ class SiameseBaselineModel(torch.nn.Module):
         self.model_cfg = model_cfg
         self.nseg = model_cfg.nseg
         self.netvlad = model_cfg.netvlad
-        self.resnet50 = ft_net_SE( class_num = 2498, droprate=model_cfg.droprate, stride=1, pool='gem', circle =True, init_model = init_model, netvlad = False)
+        if self.nseg>1:
+            rstride = 2
+        else: 
+            rstride = 1
+        self.resnet50 = ft_net_SE( class_num = 2498, droprate=model_cfg.droprate, stride = rstride, pool='gem', circle =True, init_model = init_model, netvlad = False)
         #self.bert_tokenizer = AutoTokenizer.from_pretrained("roberta-base")
         if self.nseg>1:
             self.gem = GeM(dim =4096)
