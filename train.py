@@ -95,6 +95,7 @@ opt = parser.parse_args()
 
 if opt.resume:
     model, opt, start_epoch = load_network(opt.name, opt)
+    model.bert_model.pooler = torch.nn.Sequential()
 else:
     start_epoch = 0
 
@@ -339,21 +340,23 @@ def draw_curve(current_epoch):
 #
 # Load a pretrainied model and reset final fully connected layer.
 #
-init_model = None
+if not opt.resume:
+    init_model = None
 
-if opt.track2: 
-    old_opt = parser.parse_args()
-    init_model, old_opt, _ = utils_T2.load_network('ft_2021SE_imbalance_s1_384_p0.5_lr1_mt_d0.2_b36_wa_sam_gem', old_opt )
+    if opt.track2: 
+        old_opt = parser.parse_args()
+        init_model, old_opt, _ = utils_T2.load_network('ft_2021SE_imbalance_s1_384_p0.5_lr1_mt_d0.2_b36_wa_sam_gem', old_opt )
 
-model = SiameseBaselineModel(opt, init_model).cuda()
+    model = SiameseBaselineModel(opt, init_model)
 
+model = model.cuda()
 ##########################
 #Put model parameter in front of the optimizer!!!
 
 # For resume:
-if start_epoch>=60:
+if start_epoch>=round(0.8*opt.num_epoch-start_epoch):
     opt.lr = opt.lr*0.1
-if start_epoch>=75:
+if start_epoch>=round(0.95*opt.num_epoch-start_epoch):
     opt.lr = opt.lr*0.1
 
 model = torch.nn.DataParallel(model, device_ids=opt.gpu_ids).cuda()
