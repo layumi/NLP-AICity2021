@@ -193,6 +193,7 @@ class CityFlowNLInferenceDataset(Dataset):
         dp = {"id": self.list_of_uuids[index]}
         self.one_id = self.list_of_uuids[index]
         dp.update(self.list_of_tracks[index])
+        track = dp
         num = len((track["frames"]))
         if self.nseg == 1: # we sample 4 images average
             nseg = 4
@@ -202,7 +203,6 @@ class CityFlowNLInferenceDataset(Dataset):
             nseg = self.nseg # we sample the same images as training
             nmotion = torch.zeros((nseg, 3, self.data_cfg.CROP_SIZE, self.data_cfg.CROP_SIZE))
             self.cropped_frames = torch.zeros((nseg, 3, self.data_cfg.CROP_SIZE, self.data_cfg.CROP_SIZE))
-        track = dp
         length = len((track["frames"])) // nseg
         nmotion = torch.zeros((min(nseg, num), 3, self.data_cfg.CROP_SIZE, self.data_cfg.CROP_SIZE))
         self.cropped_frames = torch.zeros((min(nseg, num), 3, self.data_cfg.CROP_SIZE, self.data_cfg.CROP_SIZE))
