@@ -141,6 +141,7 @@ class CityFlowNLInferenceDataset(Dataset):
         self.list_of_tracks = list(tracks.values())
         self._logger = get_logger()
         self.motion = data_cfg.motion
+        self.nseg = data_cfg.nseg
         self.transform = transforms.Compose(
                        [transforms.ToTensor(),
                         transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))])
@@ -192,20 +193,24 @@ class CityFlowNLInferenceDataset(Dataset):
         dp = {"id": self.list_of_uuids[index]}
         self.one_id = self.list_of_uuids[index]
         dp.update(self.list_of_tracks[index])
-        nseg = 4
+        num = len((track["frames"]))
+        if self.nseg == 1: # we sample 4 images average
+            nseg = 4
+            nmotion = torch.zeros((min(nseg, num), 3, self.data_cfg.CROP_SIZE, self.data_cfg.CROP_SIZE))
+            self.cropped_frames = torch.zeros((min(nseg, num), 3, self.data_cfg.CROP_SIZE, self.data_cfg.CROP_SIZE))
+        else:
+            nseg = self.nseg # we sample the same images as training
+            nmotion = torch.zeros((nseg, 3, self.data_cfg.CROP_SIZE, self.data_cfg.CROP_SIZE))
+            self.cropped_frames = torch.zeros((nseg, 3, self.data_cfg.CROP_SIZE, self.data_cfg.CROP_SIZE))
         track = dp
         length = len((track["frames"])) // nseg
-        num = len((track["frames"]))
         nmotion = torch.zeros((min(nseg, num), 3, self.data_cfg.CROP_SIZE, self.data_cfg.CROP_SIZE))
         self.cropped_frames = torch.zeros((min(nseg, num), 3, self.data_cfg.CROP_SIZE, self.data_cfg.CROP_SIZE))
         frame_idx_iter, frame_path_iter, frame_box_iter = [],[],[]
-        if len(track["frames"]) > nseg:
+        if self.nseg!=1 or len(track["frames"]) > nseg:
+            idx = np.floor(np.linspace(0, len(track["frames"]), num=nseg, endpoint=False))
             for i in range(nseg):
-                if i*length <=len(track["frames"]):
-                    frame_idx = round( (i*length+min( (i+1)*length, len((track["frames"]))))/2 )
-                    frame_idx = min(frame_idx, len((track["frames"])) -1 )
-                else:
-                    frame_idx = len((track["frames"])) -1
+                frame_idx = idx[i].astype(int)
                 frame_path = os.path.join(self.data_cfg.CITYFLOW_PATH, track["frames"][frame_idx])
                 if self.motion:
                     frame = Image.open(frame_path).convert('RGB')
@@ -249,6 +254,7 @@ class VAL_CityFlowNLDataset(Dataset):
         self.nl = nl 
         self.multi = multi
         self.motion = data_cfg.motion
+        self.nseg = data_cfg.nseg
         self.data_cfg = data_cfg
         self.aug = AutoAugment(auto_augment_policy(name='v0r', hparams=None))
         with open(self.data_cfg.JSON_PATH) as f:
@@ -335,21 +341,23 @@ class VAL_CityFlowNLDataset(Dataset):
         #else:
         #    label = 0 #negative
         track = self.list_of_tracks[index]
-        nseg = 4
+        num = len((track["frames"]))
+        if self.nseg == 1: # we sample 4 images average
+            nseg = 4
+            nmotion = torch.zeros((min(nseg, num), 3, self.data_cfg.CROP_SIZE, self.data_cfg.CROP_SIZE))
+            self.cropped_frames = torch.zeros((min(nseg, num), 3, self.data_cfg.CROP_SIZE, self.data_cfg.CROP_SIZE))
+        else:
+            nseg = self.nseg # we sample the same images as training
+            nmotion = torch.zeros((nseg, 3, self.data_cfg.CROP_SIZE, self.data_cfg.CROP_SIZE))
+            self.cropped_frames = torch.zeros((nseg, 3, self.data_cfg.CROP_SIZE, self.data_cfg.CROP_SIZE))
         self.one_id = index
         length = len((track["frames"])) // nseg
-        num = len((track["frames"]))
-        nmotion = torch.zeros((min(nseg, num), 3, self.data_cfg.CROP_SIZE, self.data_cfg.CROP_SIZE))
-        self.cropped_frames = torch.zeros((min(nseg, num), 3, self.data_cfg.CROP_SIZE, self.data_cfg.CROP_SIZE))
         frame_idx_iter, frame_path_iter, frame_box_iter = [],[],[]
         if not self.nl: 
-            if len(track["frames"]) > nseg:
+            if self.nseg!=1 or len(track["frames"]) > nseg:
+                idx = np.floor(np.linspace(0, len(track["frames"]), num=nseg, endpoint=False))
                 for i in range(nseg):
-                    if i*length <=len(track["frames"]):
-                        frame_idx = round( (i*length+min( (i+1)*length, len((track["frames"]))))/2 )
-                        frame_idx = min(frame_idx, len((track["frames"])) -1 )
-                    else:
-                        frame_idx = len((track["frames"])) -1
+                    frame_idx = idx[i].astype(int)
                     frame_path = os.path.join(self.data_cfg.CITYFLOW_PATH, track["frames"][frame_idx])
                     if self.motion:
                         frame = Image.open(frame_path).convert('RGB')

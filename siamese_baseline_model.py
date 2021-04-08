@@ -128,7 +128,7 @@ class SiameseBaselineModel(torch.nn.Module):
             visual_embeds = torch.cat((x1,x2), dim = 1) #4096
             ### nseg -> 1
             if self.nseg>1:
-                print('crop %d motions are used'% self.nseg)
+                #print('crop %d motions are used'% self.nseg)
                 visual_embeds = visual_embeds.view(-1, self.nseg, 4096).transpose(1,2).unsqueeze(-1)  # N, 4096, nseg, 1
                 visual_embeds = self.gem(visual_embeds)
 

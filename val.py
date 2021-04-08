@@ -164,6 +164,7 @@ def extract_feature_v(model, dataloaders):
             motion_data = data[1][0]
             #motion_embeds = model.resnet50_m(motion_data.cuda())
         n, c, h, w = frame_data.size()
+        print(gallery_id, n,c,h,w)
         #print(frame_data.size(), gallery_id)
         for j in range(0, n, opt.batchsize):
             img = frame_data[j:min(j+opt.batchsize,n),:,:,:]
