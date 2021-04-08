@@ -213,6 +213,7 @@ class CityFlowNLInferenceDataset(Dataset):
                 frame_idx = idx[i].astype(int)
                 frame_path = os.path.join(self.data_cfg.CITYFLOW_PATH, track["frames"][frame_idx])
                 if self.motion:
+                    print('load motion')
                     frame = Image.open(frame_path).convert('RGB')
                     motion = frame.resize((self.data_cfg.CROP_SIZE, self.data_cfg.CROP_SIZE) , Image.BICUBIC)
                     motion = self.transform(motion)
