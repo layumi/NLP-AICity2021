@@ -64,6 +64,7 @@ parser.add_argument('--color_jitter', action='store_true', help='use color jitte
 parser.add_argument('--batchsize', default=12, type=int, help='batchsize')
 parser.add_argument('--h', default=299, type=int, help='height')
 parser.add_argument('--w', default=299, type=int, help='width')
+parser.add_argument('--pad', default=0, type=float, help='width')
 parser.add_argument('--stride', default=2, type=int, help='stride')
 parser.add_argument('--nseg', default=1, type=int, help='nseg')
 parser.add_argument('--pool',default='avg', type=str, help='last pool')

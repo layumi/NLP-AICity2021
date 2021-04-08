@@ -28,6 +28,7 @@ class CityFlowNLDataset(Dataset):
         """
         self.multi = multi
         self.all3 = data_cfg.all3
+        self.pad = data_cfg.pad
         self.motion = data_cfg.motion
         self.nseg = data_cfg.nseg
         self.data_cfg = data_cfg
@@ -112,9 +113,10 @@ class CityFlowNLDataset(Dataset):
             #try:
             w = frame.size[0]
             h = frame.size[1]
-            pad = 5
-            x1, y1 = max(0, box[0]-pad), max(0, box[1]-pad)
-            x2, y2 = min(box[0] + box[2]+pad, w-1), min(box[1] + box[3]+pad, h-1)
+            padw = self.pad*w
+            padh = self.pad*h
+            x1, y1 = max(0, box[0]-padw), max(0, box[1]-padh)
+            x2, y2 = min(box[0] + box[2]+padw, w-1), min(box[1] + box[3]+padh, h-1)
             crop_id = track["track_id"]
             crop = frame.crop( ( x1, y1, x2, y2 ) )
             frame.close() # clean
@@ -151,6 +153,7 @@ class CityFlowNLInferenceDataset(Dataset):
         self._logger = get_logger()
         self.motion = data_cfg.motion
         self.all3 = data_cfg.all3
+        self.pad = data_cfg.pad
         self.nseg = data_cfg.nseg
         self.transform = transforms.Compose(
                        [transforms.ToTensor(),
@@ -173,9 +176,11 @@ class CityFlowNLInferenceDataset(Dataset):
         box = frame_box
         w = frame.size[0]
         h = frame.size[1]
-        pad = 5
-        crop = frame.crop( (max(0, box[0]-pad), max(0, box[1]-pad), 
-               min(box[0] + box[2]+pad, w-1), min(box[1] + box[3]+pad, h-1)))
+        padw = self.pad*w
+        padh = self.pad*h
+        x1, y1 = max(0, box[0]-padw), max(0, box[1]-padh)
+        x2, y2 = min(box[0] + box[2]+padw, w-1), min(box[1] + box[3]+padh, h-1)
+        crop = frame.crop( ( x1, y1, x2, y2 ) )
         crop = crop.resize((self.data_cfg.CROP_SIZE, self.data_cfg.CROP_SIZE) , Image.BICUBIC)
         #if frame_idx == 0:
         save_path = './crops/%s.jpg'%self.one_id
@@ -265,6 +270,7 @@ class VAL_CityFlowNLDataset(Dataset):
         self.motion = data_cfg.motion
         self.nseg = data_cfg.nseg
         self.all3 = data_cfg.all3
+        self.pad = data_cfg.pad
         self.data_cfg = data_cfg
         self.aug = AutoAugment(auto_augment_policy(name='v0r', hparams=None))
         with open(self.data_cfg.JSON_PATH) as f:
@@ -324,9 +330,11 @@ class VAL_CityFlowNLDataset(Dataset):
         box = frame_box
         w = frame.size[0]
         h = frame.size[1]
-        pad = 5
-        crop = frame.crop( (max(0, box[0]-pad), max(0, box[1]-pad),
-               min(box[0] + box[2]+pad, w-1), min(box[1] + box[3]+pad, h-1)))
+        padw = self.pad*w
+        padh = self.pad*h
+        x1, y1 = max(0, box[0]-padw), max(0, box[1]-padh)
+        x2, y2 = min(box[0] + box[2]+padw, w-1), min(box[1] + box[3]+padh, h-1)
+        crop = frame.crop( ( x1, y1, x2, y2 ) )
         crop = crop.resize((self.data_cfg.CROP_SIZE, self.data_cfg.CROP_SIZE) , Image.BICUBIC)
         save_path = './val_crops/%s.jpg'%self.one_id
         if not os.path.isfile(save_path):
