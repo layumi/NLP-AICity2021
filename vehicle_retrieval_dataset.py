@@ -204,8 +204,6 @@ class CityFlowNLInferenceDataset(Dataset):
             nmotion = torch.zeros((nseg, 3, self.data_cfg.CROP_SIZE, self.data_cfg.CROP_SIZE))
             self.cropped_frames = torch.zeros((nseg, 3, self.data_cfg.CROP_SIZE, self.data_cfg.CROP_SIZE))
         length = len((track["frames"])) // nseg
-        nmotion = torch.zeros((min(nseg, num), 3, self.data_cfg.CROP_SIZE, self.data_cfg.CROP_SIZE))
-        self.cropped_frames = torch.zeros((min(nseg, num), 3, self.data_cfg.CROP_SIZE, self.data_cfg.CROP_SIZE))
         frame_idx_iter, frame_path_iter, frame_box_iter = [],[],[]
         if self.nseg!=1 or len(track["frames"]) > nseg:
             idx = np.floor(np.linspace(0, len(track["frames"]), num=nseg, endpoint=False))
