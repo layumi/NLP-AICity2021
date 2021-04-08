@@ -27,7 +27,7 @@ import yaml
 from shutil import copyfile
 import random
 import numpy as np
-from DeBERTa import deberta
+#from DeBERTa import deberta
 from transformers import AutoTokenizer
 import utils_T2
 from utils import get_model_list, load_network, save_network, ContrastiveLoss, make_weights_for_balanced_classes
@@ -215,7 +215,7 @@ def train_model(model, criterion, optimizer, scheduler, start_epoch=0, num_epoch
 
     warm_up = 0.1 # We start from the 0.1*lrRate
     gamma = 0.0 #auto_aug
-    warm_iteration = round(dataset_size/opt.batchsize)*opt.warm_epoch*2 # first 5 epoch
+    warm_iteration = round(dataset_size/opt.batchsize)*opt.warm_epoch # first 5 epoch
     print(warm_iteration)
     total_iteration = round(dataset_size/opt.batchsize)*num_epochs
 
