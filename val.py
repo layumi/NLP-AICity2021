@@ -148,9 +148,9 @@ def extract_feature_l(model,dataloaders):
             for kk in  range(6):
                 for i,j,k in order[kk]:
                     nl_total = '[CLS]'
-                    nl_total + = nl3[0][i].replace('Sedan', 'sedan').replace('suv','SUV').replace('Suv','SUV').replace('Jeep','jeep').replace('  ',' ') + '[SEP]')
-                    nl_total + = nl3[0][j].replace('Sedan', 'sedan').replace('suv','SUV').replace('Suv','SUV').replace('Jeep','jeep').replace('  ',' ') + '[SEP]')
-                    nl_total + = nl3[0][k].replace('Sedan', 'sedan').replace('suv','SUV').replace('Suv','SUV').replace('Jeep','jeep').replace('  ',' ') + '[SEP]')
+                    nl_total += nl3[0][i].replace('Sedan', 'sedan').replace('suv','SUV').replace('Suv','SUV').replace('Jeep','jeep').replace('  ',' ') + '[SEP]'
+                    nl_total += nl3[0][j].replace('Sedan', 'sedan').replace('suv','SUV').replace('Suv','SUV').replace('Jeep','jeep').replace('  ',' ') + '[SEP]'
+                    nl_total += nl3[0][k].replace('Sedan', 'sedan').replace('suv','SUV').replace('Suv','SUV').replace('Jeep','jeep').replace('  ',' ') + '[SEP]'
                     nl.append(nl_total)
         else:
             for i in range(len(nl3)):
