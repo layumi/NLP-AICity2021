@@ -31,13 +31,13 @@ for t_id in tracks:
             tracks[t_id]['id'] = tracks[flag_t_id]['id']
             duplicate_count +=1
     # add the rate for the unique sentence
-    for nl in nl3:
-        k = nl.lower()
-        if kc[k]==1:
-            new_nl.append(nl)
-    tracks[t_id]['nl'] = new_nl
+    #for nl in nl3:
+    #    k = nl.lower()
+    #    if kc[k]==1:
+    #        new_nl.append(nl)
+    #tracks[t_id]['nl'] = new_nl
 
 print(duplicate_count)
-with open("data/train-tracks-clear.json", "w") as f:
+with open("data/train-tracks-clear-all3.json", "w") as f:
         json.dump(tracks, f, indent=4)
 

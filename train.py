@@ -85,6 +85,7 @@ parser.add_argument('--motion', action='store_true', help='use motion' )
 parser.add_argument('--ddloss', action='store_true', help='use ddloss' )
 parser.add_argument('--xhloss', action='store_true', help='use conloss' )
 parser.add_argument('--netvlad', action='store_true', help='use netvlad' )
+parser.add_argument('--all3', action='store_true', help='use netvlad' )
 parser.add_argument('--fixed', action='store_true', help='use netvlad' )
 parser.add_argument('--noisy', action='store_true', help='use model trained with noisy student' )
 parser.add_argument('--warm_epoch', default=10, type=int, help='the first K epoch that needs warm up')
@@ -92,6 +93,9 @@ parser.add_argument('--num_epoch', default=80, type=int, help='the first K epoch
 parser.add_argument('--resume', action='store_true', help='use arc loss' )
 parser.add_argument('--semi', action='store_true', help='transductive learning' )
 opt = parser.parse_args()
+
+if opt.all3: 
+    opt.JSON_PATH = "data/train-tracks-clear-all3.json"
 
 if opt.resume:
     model, opt, start_epoch = load_network(opt.name, opt)

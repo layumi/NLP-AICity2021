@@ -27,6 +27,7 @@ class CityFlowNLDataset(Dataset):
         :param data_cfg: CfgNode for CityFlow NL.
         """
         self.multi = multi
+        self.all3 = data_cfg.all3
         self.motion = data_cfg.motion
         self.nseg = data_cfg.nseg
         self.data_cfg = data_cfg
@@ -123,13 +124,21 @@ class CityFlowNLDataset(Dataset):
             #crop = torch.from_numpy(crop).permute([2, 0, 1]).to(
             #    dtype=torch.float32)
         nl_id = track["nl_id"]
-        nl_idx = int(random.uniform(0, len(track["nl"])))
-        nl = track["nl"][nl_idx]
-        nl = '[CLS]' + nl.replace('Sedan', 'sedan').replace('suv','SUV').replace('Suv','SUV').replace('Jeep','jeep').replace('  ',' ') + '[SEP]'
+        nl_total = '[CLS]'
+        if self.all3: 
+            rand_idx = np.random.permutation(len(track["nl"]))
+            for j in range(3): 
+                idx = rand_idx[j]
+                nl = track["nl"][idx]
+                nl_total += nl.replace('Sedan', 'sedan').replace('suv','SUV').replace('Suv','SUV').replace('Jeep','jeep').replace('  ',' ') + '[SEP]'
+        else:
+            nl_idx = int(random.uniform(0, len(track["nl"])))
+            nl = track["nl"][nl_idx]
+            nl_total += nl.replace('Sedan', 'sedan').replace('suv','SUV').replace('Suv','SUV').replace('Jeep','jeep').replace('  ',' ') + '[SEP]'
         #label = torch.Tensor([label]).to(dtype=torch.float32) # only 0,1
         if self.motion:
-            return nl, ncrops, nmotion, nl_id, crop_id, label
-        return nl, ncrops, nl_id, crop_id, label
+            return nl_total, ncrops, nmotion, nl_id, crop_id, label
+        return nl_total, ncrops, nl_id, crop_id, label
 
 class CityFlowNLInferenceDataset(Dataset):
     def __init__(self, data_cfg):
@@ -141,6 +150,7 @@ class CityFlowNLInferenceDataset(Dataset):
         self.list_of_tracks = list(tracks.values())
         self._logger = get_logger()
         self.motion = data_cfg.motion
+        self.all3 = data_cfg.all3
         self.nseg = data_cfg.nseg
         self.transform = transforms.Compose(
                        [transforms.ToTensor(),
@@ -254,6 +264,7 @@ class VAL_CityFlowNLDataset(Dataset):
         self.multi = multi
         self.motion = data_cfg.motion
         self.nseg = data_cfg.nseg
+        self.all3 = data_cfg.all3
         self.data_cfg = data_cfg
         self.aug = AutoAugment(auto_augment_policy(name='v0r', hparams=None))
         with open(self.data_cfg.JSON_PATH) as f:

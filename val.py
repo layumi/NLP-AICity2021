@@ -79,6 +79,7 @@ parser.add_argument('--fp16', action='store_true', help='use float16 instead of 
 parser.add_argument('--balance', action='store_true', help='balance sample' )
 parser.add_argument('--angle', action='store_true', help='use angle loss' )
 parser.add_argument('--arc', action='store_true', help='use arc loss' )
+parser.add_argument('--all3', action='store_true', help='use netvlad' )
 parser.add_argument('--circle', action='store_true', help='use Circle loss' )
 parser.add_argument('--motion', action='store_true', help='use Circle loss' )
 parser.add_argument('--semi', action='store_false', help='use Circle loss' )
@@ -131,13 +132,29 @@ def compute_mAP(index, good_index, junk_index):
     
     return ap, cmc, rr
 
+order = {}
+order[0] = [0,1,2]
+order[1] = [0,2,1]
+order[2] = [1,0,2]
+order[3] = [1,2,0]
+order[4] = [2,1,0]
+order[5] = [2,0,1]
 def extract_feature_l(model,dataloaders):
     features = {}
     count = 0
     for nl3, _, query_id, _, _ in tqdm(dataloaders):
         nl = []
-        for i in range(len(nl3)):
-            nl.append( '[CLS]' + nl3[i][0].replace('Sedan', 'sedan').replace('suv','SUV').replace('Suv','SUV').replace('Jeep','jeep').replace('  ',' ') + '[SEP]')
+        if opt.all3:
+            for kk in  range(6):
+                for i,j,k in order[kk]:
+                    nl_total = '[CLS]'
+                    nl_total + = nl3[0][i].replace('Sedan', 'sedan').replace('suv','SUV').replace('Suv','SUV').replace('Jeep','jeep').replace('  ',' ') + '[SEP]')
+                    nl_total + = nl3[0][j].replace('Sedan', 'sedan').replace('suv','SUV').replace('Suv','SUV').replace('Jeep','jeep').replace('  ',' ') + '[SEP]')
+                    nl_total + = nl3[0][k].replace('Sedan', 'sedan').replace('suv','SUV').replace('Suv','SUV').replace('Jeep','jeep').replace('  ',' ') + '[SEP]')
+                    nl.append(nl_total)
+        else:
+            for i in range(len(nl3)):
+                nl.append( '[CLS]' + nl3[i][0].replace('Sedan', 'sedan').replace('suv','SUV').replace('Suv','SUV').replace('Jeep','jeep').replace('  ',' ') + '[SEP]')
         tokens = bert_tokenizer.batch_encode_plus(nl, padding='longest',
                                                        return_tensors='pt')
         input_ids, attention_mask = tokens['input_ids'].cuda(), tokens['attention_mask'].cuda()
