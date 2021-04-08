@@ -32,7 +32,7 @@ class SiameseBaselineModel(torch.nn.Module):
             self.gem = GeM(dim =mid_dim)
         self.bert_model = AutoModel.from_pretrained("roberta-base")
         # remove pooler to save memory
-        self.bert_model.pooler = torch.nn.Sequential()
+        #self.bert_model.pooler = torch.nn.Sequential()
         self.logit_scale1 = torch.nn.Parameter(torch.ones(()), requires_grad=True)
         self.logit_scale2 = torch.nn.Parameter(torch.ones(()), requires_grad=True)
         #self.lang_fc = torch.nn.Linear(768, 1024)
@@ -126,6 +126,12 @@ class SiameseBaselineModel(torch.nn.Module):
             x1 = self.resnet50.model.avg_pool2(visual_embeds)
             x2 = self.resnet50.model.max_pool2(visual_embeds)
             visual_embeds = torch.cat((x1,x2), dim = 1) #4096
+            ### nseg -> 1
+            if self.nseg>1:
+                print('crop %d motions are used'% self.nseg)
+                visual_embeds = visual_embeds.view(-1, self.nseg, 4096).transpose(1,2).unsqueeze(-1)  # N, 4096, nseg, 1
+                visual_embeds = self.gem(visual_embeds)
+
             if self.motion:
                 motion = motion.view(-1, 3, self.model_cfg.CROP_SIZE, self.model_cfg.CROP_SIZE)
                 motion_embeds = self.resnet50_m(motion) # 3028, 512
