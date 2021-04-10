@@ -65,6 +65,7 @@ parser.add_argument('--color_jitter', action='store_true', help='use color jitte
 parser.add_argument('--batchsize', default=12, type=int, help='batchsize')
 parser.add_argument('--h', default=299, type=int, help='height')
 parser.add_argument('--w', default=299, type=int, help='width')
+parser.add_argument('--pad', default=0., type=float, help='padding rate')
 parser.add_argument('--stride', default=2, type=int, help='stride')
 parser.add_argument('--nseg', default=1, type=int, help='stride')
 parser.add_argument('--pool',default='avg', type=str, help='last pool')
@@ -101,6 +102,14 @@ def fliplr(img):
     img_flip = img.index_select(3,inv_idx)
     return img_flip
 
+order = {}
+order[0] = [0,1,2]
+order[1] = [0,2,1]
+order[2] = [1,0,2]
+order[3] = [1,2,0]
+order[4] = [2,1,0]
+order[5] = [2,0,1]
+
 def extract_feature_l(model,dataloaders):
     features = {}
     count = 0
@@ -108,9 +117,18 @@ def extract_feature_l(model,dataloaders):
         nl3 = dataloaders[query_id]
         ff = torch.FloatTensor(1,512).zero_().cuda()
         nl = []
-        for i in range(len(nl3)):
-            nl.append( '[CLS]' + nl3[i].replace('Sedan', 'sedan').replace('suv','SUV').replace('Suv','SUV').replace('Jeep','jeep').replace('  ',' ') + '[SEP]')
-        
+        if opt.all3:
+            for kk in  range(6):
+                    i,j,k = order[kk][0], order[kk][1], order[kk][2]
+                    nl_total = '[CLS]'
+                    nl_total += nl3[i].replace('Sedan', 'sedan').replace('suv','SUV').replace('Suv','SUV').replace('Jeep','jeep').replace('  ',' ') + '[SEP]'
+                    nl_total += nl3[j].replace('Sedan', 'sedan').replace('suv','SUV').replace('Suv','SUV').replace('Jeep','jeep').replace('  ',' ') + '[SEP]'
+                    nl_total += nl3[k].replace('Sedan', 'sedan').replace('suv','SUV').replace('Suv','SUV').replace('Jeep','jeep').replace('  ',' ') + '[SEP]'
+                    nl.append(nl_total)
+        else:
+            for i in range(len(nl3)):
+                nl.append( '[CLS]' + nl3[i].replace('Sedan', 'sedan').replace('suv','SUV').replace('Suv','SUV').replace('Jeep','jeep').replace('  ',' ') + '[SEP]')
+        print(nl)        
         tokens = bert_tokenizer.batch_encode_plus(nl, padding='longest',
                                                        return_tensors='pt')
         input_ids, attention_mask = tokens['input_ids'].cuda(), tokens['attention_mask'].cuda()
@@ -183,8 +201,8 @@ for name in names:
 bert_tokenizer = AutoTokenizer.from_pretrained("roberta-base")
 
 # Query loader
-#with open("data/test-queries.json", "r") as f:
-with open("data/test-queries-clear.json", "r") as f:
+with open("data/test-queries.json", "r") as f:
+#with open("data/test-queries-clear.json", "r") as f:
     queries = json.load(f)
 
 # Gallery loader

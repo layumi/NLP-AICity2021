@@ -72,6 +72,7 @@ parser.add_argument('--autoaug', action='store_true', help='use Color Data Augme
 parser.add_argument('--erasing_p', default=0, type=float, help='Random Erasing probability, in [0,1]')
 parser.add_argument('--deberta', action='store_true', help='use deberta' )
 parser.add_argument('--lr', default=0.05, type=float, help='learning rate')
+parser.add_argument('--pad', default=0., type=float, help='padding rate')
 parser.add_argument('--droprate', default=0.5, type=float, help='drop rate')
 parser.add_argument('--PCB', action='store_true', help='use PCB+ResNet50' )
 parser.add_argument('--CPB', action='store_true', help='use Center+ResNet50' )
@@ -146,11 +147,11 @@ def extract_feature_l(model,dataloaders):
         nl = []
         if opt.all3:
             for kk in  range(6):
-                for i,j,k in order[kk]:
+                    i,j,k = order[kk][0], order[kk][1], order[kk][2]
                     nl_total = '[CLS]'
-                    nl_total += nl3[0][i].replace('Sedan', 'sedan').replace('suv','SUV').replace('Suv','SUV').replace('Jeep','jeep').replace('  ',' ') + '[SEP]'
-                    nl_total += nl3[0][j].replace('Sedan', 'sedan').replace('suv','SUV').replace('Suv','SUV').replace('Jeep','jeep').replace('  ',' ') + '[SEP]'
-                    nl_total += nl3[0][k].replace('Sedan', 'sedan').replace('suv','SUV').replace('Suv','SUV').replace('Jeep','jeep').replace('  ',' ') + '[SEP]'
+                    nl_total += nl3[i][0].replace('Sedan', 'sedan').replace('suv','SUV').replace('Suv','SUV').replace('Jeep','jeep').replace('  ',' ') + '[SEP]'
+                    nl_total += nl3[j][0].replace('Sedan', 'sedan').replace('suv','SUV').replace('Suv','SUV').replace('Jeep','jeep').replace('  ',' ') + '[SEP]'
+                    nl_total += nl3[k][0].replace('Sedan', 'sedan').replace('suv','SUV').replace('Suv','SUV').replace('Jeep','jeep').replace('  ',' ') + '[SEP]'
                     nl.append(nl_total)
         else:
             for i in range(len(nl3)):
