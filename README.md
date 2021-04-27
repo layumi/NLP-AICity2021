@@ -1,5 +1,9 @@
 # NLP-AICity2021
 
+We have two codebases. For the final submission, we conduct the feature ensemble, where features are from two codebases.
+
+Our main code is at here: https://github.com/ShuaiBai623/AIC2021-T5-CLV 
+
 ### Download Data: 
 1 – Merge all packages into one:
 ```bash
