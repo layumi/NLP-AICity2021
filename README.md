@@ -1,5 +1,8 @@
 # NLP-AICity2021
 
+[[Poster]](https://github.com/layumi/NLP-AICity2021/blob/main/doc/08-poster.pdf)
+[[Pdf]](https://github.com/layumi/NLP-AICity2021/blob/main/doc/08.pdf)
+
 We have two codebases. For the final submission, we conduct the feature ensemble, where features are from two codebases.
 
 Our main code is at here: https://github.com/ShuaiBai623/AIC2021-T5-CLV 
