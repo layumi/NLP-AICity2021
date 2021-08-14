@@ -2,6 +2,7 @@
 
 [[Poster]](https://github.com/layumi/NLP-AICity2021/blob/main/doc/08-poster.pdf)
 [[Pdf]](https://github.com/layumi/NLP-AICity2021/blob/main/doc/CVPRW2021_NLP_AICity.pdf)
+[[Video]](https://www.bilibili.com/video/BV1yK4y1G7zr)
 
 We have two codebases. For the final submission, we conduct the feature ensemble, where features are from two codebases.
 
